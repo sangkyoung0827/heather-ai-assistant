@@ -26,10 +26,15 @@ const SAFE_SEARCH_EXTENSIONS: &[&str] = &[
     "pdf", "docx", "txt", "md", "csv", "json", "png", "jpg", "jpeg",
 ];
 const APP_ALLOWLIST: &[(&str, &str)] = &[
-    ("Chrome", "Google Chrome"),
     ("Safari", "Safari"),
+    ("Google Chrome", "Google Chrome"),
+    ("Chrome", "Google Chrome"),
     ("Finder", "Finder"),
+    ("Cursor", "Cursor"),
     ("VS Code", "Visual Studio Code"),
+    ("Notes", "Notes"),
+    ("Calendar", "Calendar"),
+    ("Music", "Music"),
     ("Terminal", "Terminal"),
 ];
 
@@ -537,7 +542,11 @@ fn open_allowlisted_app(_label: &str, system_name: &str) -> Result<(), String> {
             "Google Chrome" => "chrome",
             "Safari" => "safari",
             "Finder" => "explorer",
+            "Cursor" => "cursor",
             "Visual Studio Code" => "code",
+            "Notes" => "notepad",
+            "Calendar" => "outlookcal:",
+            "Music" => "mswindowsmusic:",
             "Terminal" => "wt",
             _ => return Err("Unsupported allowlisted app on Windows.".to_string()),
         };
@@ -553,7 +562,11 @@ fn open_allowlisted_app(_label: &str, system_name: &str) -> Result<(), String> {
             "Google Chrome" => ("google-chrome", None),
             "Safari" => return Err("Safari is not available on this platform.".to_string()),
             "Finder" => ("xdg-open", Some(".")),
+            "Cursor" => ("cursor", None),
             "Visual Studio Code" => ("code", None),
+            "Notes" => return Err("Notes is not available on this platform.".to_string()),
+            "Calendar" => return Err("Calendar is not available on this platform.".to_string()),
+            "Music" => return Err("Music is not available on this platform.".to_string()),
             "Terminal" => ("x-terminal-emulator", None),
             _ => return Err("Unsupported allowlisted app on Linux.".to_string()),
         };

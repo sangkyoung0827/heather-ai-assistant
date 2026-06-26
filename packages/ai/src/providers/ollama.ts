@@ -72,10 +72,10 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
       normalized.includes("not found") ||
       normalized.includes("model") && normalized.includes("pull")
     ) {
-      return `설정된 Ollama 모델이 설치되어 있지 않습니다. \`ollama pull ${defaultModel}\` 또는 원하는 모델 설치 명령을 실행하세요.`;
+      return `Configured Ollama model is not installed. Pull it with: ollama pull ${defaultModel}`;
     }
 
-    return "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요.";
+    return "Ollama is not running. Start it with: ollama serve";
   }
 
   async function chat(

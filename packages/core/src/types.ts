@@ -38,7 +38,11 @@ export type HeatherActionRiskLevel = "low" | "medium" | "high" | "critical";
 export type HeatherActionName =
   | "check_ollama_status"
   | "get_system_info"
+  | "open_url"
   | "open_external_url"
+  | "search_web"
+  | "search_youtube"
+  | "search_youtube_music"
   | "choose_directory"
   | "list_directory"
   | "search_files"

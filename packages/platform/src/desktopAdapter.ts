@@ -15,7 +15,17 @@ type TauriWindow = Window & {
   };
 };
 
-export const DESKTOP_APP_ALLOWLIST = ["Chrome", "Safari", "Finder", "VS Code", "Terminal"];
+export const DESKTOP_APP_ALLOWLIST = [
+  "Safari",
+  "Google Chrome",
+  "Finder",
+  "Cursor",
+  "VS Code",
+  "Notes",
+  "Calendar",
+  "Music",
+  "Terminal"
+];
 
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && Boolean((window as TauriWindow).__TAURI__?.core?.invoke);

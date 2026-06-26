@@ -83,7 +83,7 @@ export async function POST(request: Request) {
               error:
                 error instanceof Error
                   ? error.message
-                  : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요."
+                  : "Ollama is not running. Start it with: ollama serve"
             },
             { status: 503 }
           );
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     if (payload.settings.aiMode === "local_model") {
       return NextResponse.json(
         {
-          error: "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요."
+          error: "Ollama is not running. Start it with: ollama serve"
         },
         { status: 503 }
       );

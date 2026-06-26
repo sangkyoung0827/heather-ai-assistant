@@ -24,8 +24,32 @@ export const ALLOWED_HEATHER_ACTIONS: Array<{
     requiresConfirmation: false
   },
   {
+    name: "open_url",
+    description: "http/https URL만 기본 브라우저로 엽니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
     name: "open_external_url",
     description: "http/https URL만 기본 브라우저로 엽니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
+    name: "search_web",
+    description: "기본 웹 검색 URL을 열어 사용자의 검색어를 찾습니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
+    name: "search_youtube",
+    description: "YouTube 검색 결과 페이지를 엽니다. 자동 재생은 하지 않습니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
+    name: "search_youtube_music",
+    description: "YouTube Music 검색 결과 페이지를 엽니다. 자동 재생은 하지 않습니다.",
     riskLevel: "medium",
     requiresConfirmation: true
   },
@@ -134,6 +158,48 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
     actions.push(createAction({ name: "get_system_info" }));
   }
 
+  const musicQuery = inferYouTubeMusicQuery(input);
+  if (musicQuery) {
+    actions.push(
+      createAction({
+        name: "search_youtube_music",
+        description: `YouTube Music에서 "${musicQuery}" 검색 페이지를 엽니다. 자동 재생은 하지 않습니다.`,
+        args: {
+          intent: "music_search",
+          service: "youtube_music",
+          query: musicQuery,
+          url: buildSearchUrl("youtube_music", musicQuery)
+        }
+      })
+    );
+  } else if (/youtube|유튜브/.test(lower)) {
+    const query = inferServiceQuery(input, ["youtube", "유튜브"]);
+    actions.push(
+      createAction({
+        name: "search_youtube",
+        args: {
+          intent: "video_search",
+          service: "youtube",
+          query,
+          url: buildSearchUrl("youtube", query)
+        }
+      })
+    );
+  } else if (/검색|search|찾아봐|찾아 줘|찾아줘/.test(lower) && !/파일|folder|directory|폴더/.test(lower)) {
+    const query = inferServiceQuery(input, ["검색", "search", "찾아봐", "찾아 줘", "찾아줘"]);
+    actions.push(
+      createAction({
+        name: "search_web",
+        args: {
+          intent: "web_search",
+          service: "web",
+          query,
+          url: buildSearchUrl("web", query)
+        }
+      })
+    );
+  }
+
   if (/폴더|folder|directory|디렉토리/.test(lower)) {
     actions.push(createAction({ name: "choose_directory" }));
 
@@ -167,7 +233,7 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
   if (url || /링크.*열|url.*open|open.*url|사이트.*열/.test(lower)) {
     actions.push(
       createAction({
-        name: "open_external_url",
+        name: "open_url",
         args: {
           url: url || ""
         }
@@ -242,12 +308,51 @@ function inferSearchQuery(input: string): string {
   return "";
 }
 
+function inferYouTubeMusicQuery(input: string): string | null {
+  const lower = input.toLowerCase();
+  if (!/youtube music|유튜브 뮤직|유튜브뮤직|music youtube/.test(lower)) return null;
+
+  return inferServiceQuery(input, ["유튜브 뮤직에서", "유튜브뮤직에서", "youtube music", "music youtube"]);
+}
+
+function inferServiceQuery(input: string, markers: string[]): string {
+  const quoted = input.match(/["“](.+?)["”]/)?.[1];
+  if (quoted) return quoted.trim().slice(0, 120);
+
+  let query = input.trim();
+  for (const marker of markers) {
+    const index = query.toLowerCase().indexOf(marker.toLowerCase());
+    if (index >= 0) {
+      query = query.slice(index + marker.length).trim();
+      break;
+    }
+  }
+
+  query = query
+    .replace(/^(에서|로|에|을|를|좀|please)\s*/i, "")
+    .replace(/\s*(재생해줘|재생해 줘|틀어줘|틀어 줘|검색해줘|검색해 줘|찾아줘|찾아 줘|open|play|search)\s*$/i, "")
+    .trim();
+
+  return query.slice(0, 120);
+}
+
+function buildSearchUrl(service: "web" | "youtube" | "youtube_music", query: string): string {
+  const encoded = encodeURIComponent(query);
+  if (service === "youtube_music") return `https://music.youtube.com/search?q=${encoded}`;
+  if (service === "youtube") return `https://www.youtube.com/results?search_query=${encoded}`;
+  return `https://www.google.com/search?q=${encoded}`;
+}
+
 function inferAppName(input: string): string | null {
   const appMap: Array<[RegExp, string]> = [
-    [/chrome|크롬/i, "Chrome"],
+    [/chrome|크롬|google chrome/i, "Google Chrome"],
     [/safari|사파리/i, "Safari"],
     [/finder|파인더/i, "Finder"],
+    [/cursor|커서/i, "Cursor"],
     [/vs code|vscode|visual studio code/i, "VS Code"],
+    [/notes|메모/i, "Notes"],
+    [/calendar|캘린더/i, "Calendar"],
+    [/music|음악/i, "Music"],
     [/terminal|터미널/i, "Terminal"]
   ];
 

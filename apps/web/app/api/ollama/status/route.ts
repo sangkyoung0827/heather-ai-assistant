@@ -29,6 +29,6 @@ export async function POST(request: Request) {
     model,
     message: available
       ? "Ollama 연결 가능"
-      : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요."
+      : "Ollama is not running. Start it with: ollama serve"
   });
 }

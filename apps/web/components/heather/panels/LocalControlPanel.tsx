@@ -63,7 +63,12 @@ const TEST_ACTIONS: Array<{
   {
     label: "Test Open URL",
     request: "헤더, https://heather-ai-assistant.vercel.app 링크 열어줘.",
-    actionName: "open_external_url"
+    actionName: "open_url"
+  },
+  {
+    label: "Test YouTube Music",
+    request: "헤더, 유튜브 뮤직에서 Living on a Prayer 재생해줘.",
+    actionName: "search_youtube_music"
   },
   {
     label: "Test Pick Folder",
@@ -164,7 +169,7 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         available: false,
         baseUrl: settings.ollamaBaseUrl,
         model: settings.ollamaModel,
-        message: "Ollama가 실행 중인지 확인하세요"
+        message: "Ollama is not running. Start it with: ollama serve"
       };
       setOllamaStatus(data);
       return data;
@@ -320,14 +325,28 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         };
       }
 
-      if (action.name === "open_external_url") {
-        const url = String(action.args.url || request.match(/https?:\/\/[^\s)"']+/)?.[0] || "");
+      if (
+        action.name === "open_url" ||
+        action.name === "open_external_url" ||
+        action.name === "search_web" ||
+        action.name === "search_youtube" ||
+        action.name === "search_youtube_music"
+      ) {
+        const url = resolveActionUrl(action) || request.match(/https?:\/\/[^\s)"']+/)?.[0] || "";
         if (!url) throw new Error("열 URL을 찾지 못했습니다.");
-        await desktopAdapter?.openExternalUrl(url);
+        await openSafeUrl(url);
         return {
           success: true,
           actionName: action.name,
-          summaryForUser: `${url} 링크를 열었습니다.`
+          result: {
+            service: action.args.service,
+            query: action.args.query,
+            url
+          },
+          summaryForUser:
+            action.name === "search_youtube_music"
+              ? `YouTube Music에서 "${String(action.args.query || "")}" 검색 페이지를 열었습니다. 자동 재생은 하지 않았습니다.`
+              : `${url} 링크를 열었습니다.`
         };
       }
 
@@ -400,6 +419,20 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
       throw new Error("먼저 폴더를 선택해야 합니다.");
     }
     return folder.id;
+  }
+
+  async function openSafeUrl(url: string) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("http/https URL만 열 수 있습니다.");
+    }
+
+    if (desktopAdapter) {
+      await desktopAdapter.openExternalUrl(url);
+      return;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   function appendLog(action: HeatherAction, result: ActionResult) {
@@ -835,7 +868,16 @@ function ConfirmRow({
 }
 
 function summarizeArgs(action: HeatherAction): string {
-  if (action.name === "open_external_url") return String(action.args.url || "입력 요청에서 URL 추출");
+  if (
+    action.name === "open_url" ||
+    action.name === "open_external_url" ||
+    action.name === "search_web" ||
+    action.name === "search_youtube" ||
+    action.name === "search_youtube_music"
+  ) {
+    const query = action.args.query ? ` / query: ${String(action.args.query)}` : "";
+    return `${String(action.args.service || "url")}: ${String(action.args.url || "입력 요청에서 URL 추출")}${query}`;
+  }
   if (action.name === "open_app") return String(action.args.appName || "앱 allowlist");
   if (action.name === "search_files") {
     const extensions = Array.isArray(action.args.extensions) ? action.args.extensions.join(", ") : "허용 확장자";
@@ -845,4 +887,22 @@ function summarizeArgs(action: HeatherAction): string {
   if (action.name.includes("clipboard")) return "클립보드 내용은 로그에 저장하지 않음";
   if (action.name === "capture_screen") return "화면 캡처 미리보기";
   return "민감한 인자 없음";
+}
+
+function resolveActionUrl(action: HeatherAction): string {
+  const explicitUrl = String(action.args.url || "");
+  if (explicitUrl) return explicitUrl;
+
+  const query = String(action.args.query || "");
+  if (action.name === "search_youtube_music") {
+    return `https://music.youtube.com/search?q=${encodeURIComponent(query)}`;
+  }
+  if (action.name === "search_youtube") {
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+  }
+  if (action.name === "search_web") {
+    return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+  }
+
+  return "";
 }
