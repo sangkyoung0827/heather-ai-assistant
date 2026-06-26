@@ -8,6 +8,7 @@ import {
   Database,
   FolderKanban,
   Home,
+  Laptop,
   MessageSquare,
   Mic,
   Settings,
@@ -23,6 +24,7 @@ import { AnalysisPanel } from "./panels/AnalysisPanel";
 import { AutomationPanel } from "./panels/AutomationPanel";
 import { BriefingPanel } from "./panels/BriefingPanel";
 import { ChatPanel } from "./panels/ChatPanel";
+import { LocalControlPanel } from "./panels/LocalControlPanel";
 import { MemoryPanel } from "./panels/MemoryPanel";
 import { ProjectsPanel } from "./panels/ProjectsPanel";
 import { SettingsPanel } from "./panels/SettingsPanel";
@@ -34,6 +36,7 @@ export type HeatherView =
   | "projects"
   | "memory"
   | "automation"
+  | "local_control"
   | "training"
   | "analysis"
   | "settings";
@@ -50,6 +53,7 @@ const NAVIGATION: NavigationItem[] = [
   { id: "projects", label: "프로젝트", icon: FolderKanban },
   { id: "memory", label: "메모리", icon: Database },
   { id: "automation", label: "Jarvis 루틴", icon: Zap },
+  { id: "local_control", label: "Local Control", icon: Laptop },
   { id: "training", label: "학습/생성", icon: Sparkles },
   { id: "analysis", label: "사람/조직 분석", icon: Users },
   { id: "settings", label: "설정", icon: Settings }
@@ -194,6 +198,12 @@ export function HeatherWorkspace() {
                     recipes={data.automationRecipes}
                     onSaveRecipe={data.saveAutomationRecipe}
                     onDeleteRecipe={data.deleteAutomationRecipe}
+                  />
+                )}
+                {activeView === "local_control" && (
+                  <LocalControlPanel
+                    settings={data.settings}
+                    onSaveSettings={data.saveSettings}
                   />
                 )}
                 {activeView === "training" && (

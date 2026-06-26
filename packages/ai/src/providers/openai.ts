@@ -6,7 +6,7 @@ import {
   generateConversationTitle
 } from "@heather/core";
 import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
-import type { AIProvider, AIProviderConfig } from "../types";
+import type { AIProvider, AIProviderConfig, ChatMessage } from "../types";
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -59,6 +59,45 @@ function buildContext(payload: ChatRequestPayload): string {
 export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
   return {
     id: "openai",
+    async isAvailable(): Promise<boolean> {
+      return Boolean(config.apiKey);
+    },
+    async chat(messages: ChatMessage[], options = {}) {
+      if (!config.apiKey) {
+        throw new Error("OPENAI_API_KEY is missing.");
+      }
+
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: options.model || config.model || "gpt-4o-mini",
+          temperature: options.temperature ?? 0.7,
+          max_tokens: options.maxTokens || 700,
+          messages
+        })
+      });
+
+      const data = (await response.json()) as ChatCompletionResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || `OpenAI request failed: ${response.status}`);
+      }
+
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        throw new Error("OpenAI returned an empty message.");
+      }
+
+      return {
+        content,
+        model: options.model || config.model || "gpt-4o-mini",
+        raw: data
+      };
+    },
     async generateChat(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
       if (!config.apiKey) {
         throw new Error("OPENAI_API_KEY is missing.");
@@ -72,38 +111,22 @@ export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
           content: message.content.slice(0, 1200)
         }));
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: config.model || "gpt-4o-mini",
+      const data = await this.chat(
+        [
+          { role: "system", content: buildHeatherSystemPrompt(payload.settings) },
+          { role: "system", content: buildContext(payload) },
+          ...(history || []),
+          { role: "user", content: payload.message }
+        ],
+        {
+          model: config.model,
           temperature: 0.7,
-          max_tokens: 700,
-          messages: [
-            { role: "system", content: buildHeatherSystemPrompt(payload.settings) },
-            { role: "system", content: buildContext(payload) },
-            ...(history || []),
-            { role: "user", content: payload.message }
-          ]
-        })
-      });
-
-      const data = (await response.json()) as ChatCompletionResponse;
-
-      if (!response.ok) {
-        throw new Error(data.error?.message || `OpenAI request failed: ${response.status}`);
-      }
-
-      const message = data.choices?.[0]?.message?.content?.trim();
-      if (!message) {
-        throw new Error("OpenAI returned an empty message.");
-      }
+          maxTokens: 700
+        }
+      );
 
       return {
-        message,
+        message: data.content,
         title: generateConversationTitle(payload.message),
         risk: classifyActionRisk(payload.message)
       };

@@ -6,12 +6,26 @@ import {
   generateConversationTitle
 } from "@heather/core";
 import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
-import type { AIProvider, AIProviderConfig } from "../types";
+import type {
+  AIProvider,
+  AIProviderConfig,
+  ChatMessage,
+  ChatOptions,
+  ProviderChatResponse
+} from "../types";
 
 interface OllamaChatResponse {
   message?: {
     content?: string;
   };
+  model?: string;
+  done?: boolean;
+  error?: string;
+}
+
+interface OllamaGenerateResponse {
+  response?: string;
+  model?: string;
   error?: string;
 }
 
@@ -48,11 +62,67 @@ function compactContext(payload: ChatRequestPayload): string {
 }
 
 export function createOllamaProvider(config: AIProviderConfig): AIProvider {
-  const baseUrl = config.baseUrl || "http://127.0.0.1:11434";
-  const model = config.model || "llama3.1";
+  const baseUrl = (config.baseUrl || "http://localhost:11434").replace(/\/$/, "");
+  const defaultModel = config.model || "llama3.1";
+
+  async function chat(
+    messages: ChatMessage[],
+    options: ChatOptions = {}
+  ): Promise<ProviderChatResponse> {
+    const model = options.model || defaultModel;
+    let response: Response;
+
+    try {
+      response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          messages,
+          options: {
+            temperature: options.temperature ?? 0.6,
+            num_predict: options.maxTokens || 700
+          }
+        })
+      });
+    } catch (error) {
+      throw new Error(
+        `Ollama가 실행 중인지 확인하세요. ${error instanceof Error ? error.message : ""}`.trim()
+      );
+    }
+
+    const data = (await response.json()) as OllamaChatResponse;
+
+    if (!response.ok) {
+      throw new Error(data.error || `Ollama가 실행 중인지 확인하세요. (${response.status})`);
+    }
+
+    const content = data.message?.content?.trim();
+    if (!content) {
+      throw new Error("Ollama가 실행 중인지 확인하세요. Ollama returned an empty message.");
+    }
+
+    return {
+      content,
+      model: data.model || model,
+      raw: data
+    };
+  }
 
   return {
     id: "ollama",
+    chat,
+    async isAvailable(): Promise<boolean> {
+      try {
+        const response = await fetch(`${baseUrl}/api/tags`);
+        return response.ok;
+      } catch {
+        return false;
+      }
+    },
     async generateChat(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
       const history = payload.conversation?.messages
         .filter((message) => message.role !== "system")
@@ -62,42 +132,97 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           content: message.content.slice(0, 1200)
         }));
 
-      const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
+      const response = await chat(
+        [
+          { role: "system", content: buildHeatherSystemPrompt(payload.settings) },
+          { role: "system", content: compactContext(payload) },
+          ...(history || []),
+          { role: "user", content: payload.message }
+        ],
+        {
+          model: payload.settings.ollamaModel || defaultModel,
+          temperature: 0.6,
+          maxTokens: 700
+        }
+      );
+
+      return {
+        message: response.content,
+        title: generateConversationTitle(payload.message),
+        risk: classifyActionRisk(payload.message)
+      };
+    },
+    async *streamChat(messages: ChatMessage[], options: ChatOptions = {}) {
+      const model = options.model || defaultModel;
+      const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
           model,
-          stream: false,
-          messages: [
-            { role: "system", content: buildHeatherSystemPrompt(payload.settings) },
-            { role: "system", content: compactContext(payload) },
-            ...(history || []),
-            { role: "user", content: payload.message }
-          ],
+          stream: true,
+          messages,
           options: {
-            temperature: 0.6,
-            num_predict: 700
+            temperature: options.temperature ?? 0.6,
+            num_predict: options.maxTokens || 700
           }
         })
       });
 
-      const data = (await response.json()) as OllamaChatResponse;
-
-      if (!response.ok) {
-        throw new Error(data.error || `Ollama request failed: ${response.status}`);
+      if (!response.ok || !response.body) {
+        throw new Error(`Ollama가 실행 중인지 확인하세요. (${response.status})`);
       }
 
-      const message = data.message?.content?.trim();
-      if (!message) {
-        throw new Error("Ollama returned an empty message.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const parsed = JSON.parse(line) as OllamaChatResponse;
+          yield {
+            content: parsed.message?.content || "",
+            done: parsed.done
+          };
+        }
+      }
+    },
+    async generate(messages: ChatMessage[], options: ChatOptions = {}) {
+      const model = options.model || defaultModel;
+      const prompt = messages.map((message) => `${message.role}: ${message.content}`).join("\n");
+      const response = await fetch(`${baseUrl}/api/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          stream: false,
+          options: {
+            temperature: options.temperature ?? 0.6,
+            num_predict: options.maxTokens || 700
+          }
+        })
+      });
+
+      const data = (await response.json()) as OllamaGenerateResponse;
+      if (!response.ok) {
+        throw new Error(data.error || `Ollama가 실행 중인지 확인하세요. (${response.status})`);
       }
 
       return {
-        message,
-        title: generateConversationTitle(payload.message),
-        risk: classifyActionRisk(payload.message)
+        content: data.response?.trim() || "",
+        model: data.model || model,
+        raw: data
       };
     }
   };

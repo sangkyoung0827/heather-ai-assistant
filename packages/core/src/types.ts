@@ -33,6 +33,21 @@ export type AutomationActionType =
   | "clipboard_read"
   | "clipboard_write";
 
+export type HeatherActionRiskLevel = "low" | "medium" | "high" | "critical";
+
+export type HeatherActionName =
+  | "check_ollama_status"
+  | "get_system_info"
+  | "open_external_url"
+  | "choose_directory"
+  | "list_directory"
+  | "search_files"
+  | "read_text_file"
+  | "get_clipboard_text"
+  | "set_clipboard_text"
+  | "capture_screen"
+  | "open_app";
+
 export type MemoryType =
   | "user_profile"
   | "project_context"
@@ -166,9 +181,40 @@ export interface AutomationPlan {
   steps: AutomationExecutionStep[];
 }
 
+export interface HeatherAction {
+  id: string;
+  name: HeatherActionName;
+  description: string;
+  riskLevel: HeatherActionRiskLevel;
+  requiresConfirmation: boolean;
+  args: Record<string, unknown>;
+}
+
+export interface ActionResult {
+  success: boolean;
+  actionName: HeatherActionName;
+  result?: unknown;
+  error?: string;
+  summaryForUser: string;
+}
+
+export interface ActionLogRecord {
+  id: string;
+  requestedAt: string;
+  userRequest: string;
+  actionName: HeatherActionName;
+  riskLevel: HeatherActionRiskLevel;
+  requiresConfirmation: boolean;
+  argsSummary: string;
+  success: boolean;
+  summaryForUser: string;
+}
+
 export interface HeatherSettings {
   tone: HeatherTone;
   aiMode: HeatherAIMode;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
   allowPaidApiCalls: boolean;
   monthlyApiCallLimit: number;
   apiCallsThisMonth: number;

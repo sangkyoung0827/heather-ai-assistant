@@ -11,9 +11,18 @@
     "dev": "npm run dev -w @heather/web",
     "build": "npm run build -w @heather/web",
     "lint": "npm run lint -w @heather/web",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "tauri:dev": "npx tauri dev",
+    "tauri:build": "npx tauri build",
+    "tauri:info": "npx tauri info"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.3"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1"
   }
 }

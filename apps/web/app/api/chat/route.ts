@@ -54,8 +54,8 @@ export async function POST(request: Request) {
       }));
     }
 
-    const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
-    const ollamaModel = process.env.OLLAMA_MODEL;
+    const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || payload.settings.ollamaBaseUrl;
+    const ollamaModel = payload.settings.ollamaModel || process.env.OLLAMA_MODEL;
 
     if (ollamaBaseUrl) {
       try {
