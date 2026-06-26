@@ -62,12 +62,28 @@ function upsert<T extends { id: string }>(items: T[], item: T): T[] {
 export class BrowserHeatherDatabase implements HeatherDatabase {
   async getSettings(): Promise<HeatherSettings> {
     const defaults = createDefaultSettings();
+    const rawSettings = storage().getItem(key("settings"));
     const stored = readJson<Partial<HeatherSettings>>("settings", defaults);
     const currentMonth = new Date().toISOString().slice(0, 7);
     const merged = {
       ...defaults,
       ...stored
     };
+
+    const hasStoredSettings = Boolean(rawSettings);
+    const isLegacyLocalOnlyDefault =
+      hasStoredSettings &&
+      merged.aiMode === "local_only" &&
+      (!stored.ollamaBaseUrl || stored.ollamaBaseUrl === "http://127.0.0.1:11434") &&
+      (!stored.ollamaModel || stored.ollamaModel === "llama3.1");
+
+    if (isLegacyLocalOnlyDefault) {
+      merged.aiMode = "local_model";
+      merged.ollamaBaseUrl = defaults.ollamaBaseUrl;
+      merged.ollamaModel = defaults.ollamaModel;
+      merged.cacheResponses = false;
+      writeJson("settings", merged);
+    }
 
     if (merged.apiUsageMonth !== currentMonth) {
       merged.apiUsageMonth = currentMonth;

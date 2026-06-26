@@ -221,6 +221,7 @@ export interface HeatherSettings {
   apiUsageMonth: string;
   cacheResponses: boolean;
   voiceOutputEnabled: boolean;
+  voiceAutoReadEnabled: boolean;
   voiceName: string;
   memoryEnabled: boolean;
   projectMemoryEnabled: boolean;

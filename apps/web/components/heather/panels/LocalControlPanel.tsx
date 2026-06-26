@@ -27,6 +27,7 @@ import type {
   ActionLogRecord,
   ActionResult,
   HeatherAction,
+  HeatherActionName,
   HeatherSettings
 } from "@heather/core";
 import {
@@ -49,6 +50,42 @@ type OllamaStatus = {
 };
 
 const DEFAULT_REQUEST = "헤더, Ollama 연결 상태 확인해줘.";
+const TEST_ACTIONS: Array<{
+  label: string;
+  request: string;
+  actionName: HeatherActionName;
+}> = [
+  {
+    label: "Test System Info",
+    request: "헤더, 내 컴퓨터 정보를 확인해줘.",
+    actionName: "get_system_info"
+  },
+  {
+    label: "Test Open URL",
+    request: "헤더, https://heather-ai-assistant.vercel.app 링크 열어줘.",
+    actionName: "open_external_url"
+  },
+  {
+    label: "Test Pick Folder",
+    request: "헤더, 내가 선택한 폴더를 허용해줘.",
+    actionName: "choose_directory"
+  },
+  {
+    label: "Test Search Files",
+    request: "헤더, 내가 선택한 폴더 안의 pdf md csv json 파일을 찾아줘.",
+    actionName: "search_files"
+  },
+  {
+    label: "Test Read Text File",
+    request: "헤더, 이 폴더 안의 md 파일을 읽고 요약해줘.",
+    actionName: "read_text_file"
+  },
+  {
+    label: "Test Action Log",
+    request: "헤더, Ollama 연결 상태 확인해줘.",
+    actionName: "check_ollama_status"
+  }
+];
 
 export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPanelProps) {
   const desktopAdapter = useMemo(
@@ -173,13 +210,20 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
     setNotice("");
   }
 
-  async function runAction(action: HeatherAction) {
-    if (action.requiresConfirmation) {
-      setPendingAction(action);
-      return;
-    }
+  async function runTestRequest(testRequest: string, actionName: HeatherActionName) {
+    const actions = createActionPlanFromRequest(testRequest);
+    const selectedAction = actions.find((action) => action.name === actionName) || actions[0];
+    setRequest(testRequest);
+    setPlannedActions(actions);
+    setNotice("");
 
-    await executeAction(action);
+    if (selectedAction) {
+      await runAction(selectedAction);
+    }
+  }
+
+  async function runAction(action: HeatherAction) {
+    setPendingAction(action);
   }
 
   async function executeAction(action: HeatherAction) {
@@ -242,7 +286,7 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
           query: String(action.args.query || ""),
           extensions: Array.isArray(action.args.extensions)
             ? (action.args.extensions as string[])
-            : ["pdf", "docx", "txt", "md", "png", "jpg"]
+            : ["pdf", "docx", "txt", "md", "csv", "json", "png", "jpg"]
         });
         setFiles(entries);
         return {
@@ -470,6 +514,19 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
             </button>
           </div>
 
+          <div className="mt-3 flex flex-wrap gap-2 rounded-lg border border-line bg-slate-50 p-3">
+            {TEST_ACTIONS.map((testAction) => (
+              <button
+                key={testAction.label}
+                type="button"
+                onClick={() => void runTestRequest(testAction.request, testAction.actionName)}
+                className="rounded-lg border border-line bg-white px-3 py-2 text-xs font-semibold hover:bg-slate-100"
+              >
+                {testAction.label}
+              </button>
+            ))}
+          </div>
+
           <div className="mt-4 space-y-2">
             {plannedActions.map((action) => (
               <div key={action.id} className="rounded-lg border border-line bg-slate-50 p-3">
@@ -510,6 +567,8 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
               <InfoTile label="OS" value={systemInfo.osName} />
               <InfoTile label="App" value={systemInfo.appVersion} />
               <InfoTile label="Home" value={systemInfo.homeLabel} />
+              <InfoTile label="CPU" value={systemInfo.cpuSummary} />
+              <InfoTile label="Memory" value={systemInfo.memorySummary} />
             </div>
           ) : null}
           {files.length ? (

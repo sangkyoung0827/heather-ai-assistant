@@ -8,6 +8,7 @@ import {
   MicOff,
   Search,
   Send,
+  Square,
   Trash2,
   Volume2
 } from "lucide-react";
@@ -59,6 +60,11 @@ interface SpeechRecognitionEventLike {
   results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>;
 }
 
+interface SpeechRecognitionErrorEventLike {
+  error?: string;
+  message?: string;
+}
+
 interface SpeechRecognitionLike {
   lang: string;
   interimResults: boolean;
@@ -66,7 +72,7 @@ interface SpeechRecognitionLike {
   start(): void;
   stop(): void;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
   onend: (() => void) | null;
 }
 
@@ -98,7 +104,9 @@ export function ChatPanel({
   const [isListening, setIsListening] = useState(false);
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
   const [providerStatus, setProviderStatus] = useState("대기 중");
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceBaseDraftRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeConversation = useMemo(
@@ -127,6 +135,14 @@ export function ChatPanel({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [activeConversation?.messages.length, isSending]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   async function handleNewConversation() {
     const conversation = createConversation();
@@ -205,8 +221,11 @@ export function ChatPanel({
         });
       }
 
-      if (settings.voiceOutputEnabled) {
-        speakHeather(data.message, settings.voiceName);
+      if (settings.voiceOutputEnabled && settings.voiceAutoReadEnabled) {
+        speakHeather(data.message, settings.voiceName, {
+          onStart: () => setSpeakingMessageId(assistantMessage.id),
+          onEnd: () => setSpeakingMessageId(null)
+        });
       }
     } catch (error) {
       const assistantMessage = createMessage(
@@ -279,28 +298,54 @@ export function ChatPanel({
     }
 
     const recognition = new SpeechRecognition();
+    voiceBaseDraftRef.current = draft.trim();
     recognition.lang = "ko-KR";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.onresult = (event) => {
       const result = event.results[event.results.length - 1]?.[0]?.transcript;
       if (result) {
-        setDraft(result);
+        const base = voiceBaseDraftRef.current;
+        setDraft(base ? `${base} ${result}` : result);
         setInputSource("voice");
       }
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
       setIsListening(false);
-      setProviderStatus("음성 입력 오류");
+      const permissionErrors = ["not-allowed", "service-not-allowed", "permission-denied"];
+      setProviderStatus(
+        event.error && permissionErrors.includes(event.error)
+          ? "마이크 권한이 거부되었습니다. 브라우저/시스템 권한을 확인하세요."
+          : `음성 입력 오류${event.error ? `: ${event.error}` : ""}`
+      );
     };
     recognition.onend = () => {
       setIsListening(false);
+      recognitionRef.current = null;
     };
 
     recognitionRef.current = recognition;
     setIsListening(true);
     setProviderStatus("음성 입력 중");
     recognition.start();
+  }
+
+  function toggleSpeakMessage(messageId: string, text: string) {
+    if (!settings.voiceOutputEnabled) {
+      setProviderStatus("음성 출력이 꺼져 있습니다.");
+      return;
+    }
+
+    if (speakingMessageId === messageId) {
+      stopHeatherSpeech();
+      setSpeakingMessageId(null);
+      return;
+    }
+
+    speakHeather(text, settings.voiceName, {
+      onStart: () => setSpeakingMessageId(messageId),
+      onEnd: () => setSpeakingMessageId(null)
+    });
   }
 
   return (
@@ -403,12 +448,37 @@ export function ChatPanel({
                   }`}
                 >
                   <div className="whitespace-pre-wrap">{message.content}</div>
-                  <div className={`mt-2 text-xs ${message.role === "user" ? "text-heather-100" : "text-slate-400"}`}>
-                    {message.source === "voice" ? "voice" : "text"} ·{" "}
-                    {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}
+                  <div
+                    className={`mt-2 flex flex-wrap items-center gap-2 text-xs ${
+                      message.role === "user" ? "text-heather-100" : "text-slate-400"
+                    }`}
+                  >
+                    <span>
+                      {message.source === "voice" ? "voice" : "text"} ·{" "}
+                      {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
+                    </span>
+                    {message.role === "assistant" ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleSpeakMessage(message.id, message.content)}
+                        className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 font-semibold text-heather-700 hover:bg-heather-50"
+                      >
+                        {speakingMessageId === message.id ? (
+                          <>
+                            <Square className="h-3 w-3" />
+                            중지
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="h-3 w-3" />
+                            읽어주기
+                          </>
+                        )}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </article>
@@ -454,7 +524,7 @@ export function ChatPanel({
                 setInputSource("text");
               }}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   void handleSend();
                 }
@@ -463,6 +533,11 @@ export function ChatPanel({
               className="min-h-12 flex-1 resize-none rounded-lg border border-line bg-white px-3 py-3 text-sm leading-5"
               rows={1}
             />
+            {isListening ? (
+              <span className="self-center rounded-md bg-red-50 px-2 py-1 text-xs font-semibold text-coral">
+                녹음 중
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleSend()}
@@ -545,6 +620,8 @@ function cacheKey(payload: ChatRequestPayload): string {
     message: payload.message.trim().toLowerCase(),
     tone: payload.settings.tone,
     aiMode: payload.settings.aiMode,
+    ollamaBaseUrl: payload.settings.ollamaBaseUrl,
+    ollamaModel: payload.settings.ollamaModel,
     memories: payload.memories
       .filter((memory) => !memory.archived)
       .slice(0, 6)
@@ -585,15 +662,32 @@ function hashString(value: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function speakHeather(text: string, voiceName: string) {
+function stopHeatherSpeech() {
   if (typeof window === "undefined") return;
   if (!("speechSynthesis" in window)) return;
+
+  window.speechSynthesis.cancel();
+}
+
+function speakHeather(
+  text: string,
+  voiceName: string,
+  callbacks: {
+    onStart?: () => void;
+    onEnd?: () => void;
+  } = {}
+) {
+  if (typeof window === "undefined") return false;
+  if (!("speechSynthesis" in window)) return false;
 
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text.replace(/[#*_`>-]/g, ""));
   utterance.lang = "ko-KR";
   utterance.rate = 1;
   utterance.pitch = 1.02;
+  utterance.onstart = callbacks.onStart || null;
+  utterance.onend = callbacks.onEnd || null;
+  utterance.onerror = callbacks.onEnd || null;
 
   const voices = window.speechSynthesis.getVoices();
   const selectedVoice =
@@ -605,4 +699,5 @@ function speakHeather(text: string, voiceName: string) {
   }
 
   window.speechSynthesis.speak(utterance);
+  return true;
 }

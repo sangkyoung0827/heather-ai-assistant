@@ -47,6 +47,7 @@ const AI_MODE_OPTIONS: Array<{
 export function SettingsPanel({ settings, onSaveSettings, onClearAll }: SettingsPanelProps) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [micStatus, setMicStatus] = useState("확인 전");
+  const [voiceTestStatus, setVoiceTestStatus] = useState("대기 중");
   const platform = useMemo(() => new WebPlatformAdapter(), []);
 
   useEffect(() => {
@@ -71,6 +72,29 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
   async function checkMicrophone() {
     const allowed = await platform.requestMicrophonePermission();
     setMicStatus(allowed ? "허용됨" : "거부 또는 미지원");
+  }
+
+  function testVoice() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setVoiceTestStatus("이 환경은 음성 출력을 지원하지 않습니다.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance("안녕, 나는 헤더야. 오늘은 무엇을 도와주면 좋을까?");
+    utterance.lang = "ko-KR";
+    utterance.rate = 1;
+    utterance.pitch = 1.02;
+    const selectedVoice =
+      voices.find((voice) => voice.name === settings.voiceName) ||
+      voices.find((voice) => voice.lang.toLowerCase().startsWith("ko"));
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+    utterance.onstart = () => setVoiceTestStatus("재생 중");
+    utterance.onend = () => setVoiceTestStatus("재생 완료");
+    utterance.onerror = () => setVoiceTestStatus("재생 실패");
+    window.speechSynthesis.speak(utterance);
   }
 
   async function clearAllData() {
@@ -179,9 +203,14 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
             <h4 className="font-semibold">음성 출력</h4>
           </div>
           <Toggle
-            label="헤더 답변 TTS 재생"
+            label="음성 출력 사용"
             checked={settings.voiceOutputEnabled}
             onChange={(checked) => void update({ voiceOutputEnabled: checked })}
+          />
+          <Toggle
+            label="답변 자동 읽기"
+            checked={settings.voiceAutoReadEnabled}
+            onChange={(checked) => void update({ voiceAutoReadEnabled: checked })}
           />
           <label className="block">
             <span className="text-sm font-medium">목소리 선택</span>
@@ -201,13 +230,22 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={testVoice}
+              className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+            >
+              <Volume2 className="h-4 w-4 text-heather-700" />
+              테스트 문장 재생
+            </button>
+            <button
+              type="button"
               onClick={checkMicrophone}
               className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
             >
               <Mic className="h-4 w-4 text-heather-700" />
               마이크 권한 확인
             </button>
-            <span className="text-sm text-slate-500">{micStatus}</span>
+            <span className="text-sm text-slate-500">TTS: {voiceTestStatus}</span>
+            <span className="text-sm text-slate-500">Mic: {micStatus}</span>
           </div>
         </section>
 

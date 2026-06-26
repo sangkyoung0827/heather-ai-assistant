@@ -47,6 +47,14 @@ interface NavigationItem {
   icon: LucideIcon;
 }
 
+type TauriEventWindow = Window & {
+  __TAURI__?: {
+    event?: {
+      listen<T>(event: string, handler: (payload: { payload: T }) => void): Promise<() => void>;
+    };
+  };
+};
+
 const NAVIGATION: NavigationItem[] = [
   { id: "briefing", label: "브리핑", icon: Home },
   { id: "chat", label: "채팅", icon: MessageSquare },
@@ -65,6 +73,25 @@ export function HeatherWorkspace() {
 
   useEffect(() => {
     registerHeatherServiceWorker();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const listen = (window as TauriEventWindow).__TAURI__?.event?.listen;
+    if (!listen) return;
+
+    let unlisten: (() => void) | null = null;
+    void listen<string>("heather://open-view", (event) => {
+      if (event.payload === "local_control" || event.payload === "settings" || event.payload === "chat") {
+        setActiveView(event.payload);
+      }
+    }).then((nextUnlisten) => {
+      unlisten = nextUnlisten;
+    });
+
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   const activeProjectCount = useMemo(

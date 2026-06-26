@@ -233,7 +233,7 @@ function inferExtensions(input: string): string[] {
   const allowed = ["pdf", "docx", "txt", "md", "png", "jpg", "csv", "json"];
   const lower = input.toLowerCase();
   const picked = allowed.filter((extension) => lower.includes(extension));
-  return picked.length ? picked : ["pdf", "docx", "txt", "md", "png", "jpg"];
+  return picked.length ? picked : ["pdf", "docx", "txt", "md", "csv", "json", "png", "jpg"];
 }
 
 function inferSearchQuery(input: string): string {

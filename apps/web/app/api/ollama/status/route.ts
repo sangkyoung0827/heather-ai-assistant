@@ -10,8 +10,16 @@ interface OllamaStatusRequest {
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as OllamaStatusRequest;
-  const baseUrl = payload.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const model = payload.model || process.env.OLLAMA_MODEL || "llama3.1";
+  const baseUrl =
+    process.env.HEATHER_OLLAMA_BASE_URL ||
+    process.env.OLLAMA_BASE_URL ||
+    payload.baseUrl ||
+    "http://localhost:11434";
+  const model =
+    process.env.HEATHER_OLLAMA_MODEL ||
+    process.env.OLLAMA_MODEL ||
+    payload.model ||
+    "gemma4:latest";
   const provider = createOllamaProvider({ baseUrl, model });
   const available = await provider.isAvailable();
 
@@ -19,6 +27,8 @@ export async function POST(request: Request) {
     available,
     baseUrl,
     model,
-    message: available ? "Ollama 연결 가능" : "Ollama가 실행 중인지 확인하세요"
+    message: available
+      ? "Ollama 연결 가능"
+      : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요."
   });
 }

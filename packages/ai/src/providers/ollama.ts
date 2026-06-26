@@ -63,7 +63,20 @@ function compactContext(payload: ChatRequestPayload): string {
 
 export function createOllamaProvider(config: AIProviderConfig): AIProvider {
   const baseUrl = (config.baseUrl || "http://localhost:11434").replace(/\/$/, "");
-  const defaultModel = config.model || "llama3.1";
+  const defaultModel = config.model || "gemma4:latest";
+
+  function mapOllamaError(message: string, status?: number): string {
+    const normalized = message.toLowerCase();
+    if (
+      status === 404 ||
+      normalized.includes("not found") ||
+      normalized.includes("model") && normalized.includes("pull")
+    ) {
+      return `설정된 Ollama 모델이 설치되어 있지 않습니다. \`ollama pull ${defaultModel}\` 또는 원하는 모델 설치 명령을 실행하세요.`;
+    }
+
+    return "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요.";
+  }
 
   async function chat(
     messages: ChatMessage[],
@@ -81,28 +94,27 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
         body: JSON.stringify({
           model,
           stream: false,
+          think: false,
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 700
+            num_predict: options.maxTokens || 320
           }
         })
       });
     } catch (error) {
-      throw new Error(
-        `Ollama가 실행 중인지 확인하세요. ${error instanceof Error ? error.message : ""}`.trim()
-      );
+      throw new Error(mapOllamaError(error instanceof Error ? error.message : ""));
     }
 
     const data = (await response.json()) as OllamaChatResponse;
 
     if (!response.ok) {
-      throw new Error(data.error || `Ollama가 실행 중인지 확인하세요. (${response.status})`);
+      throw new Error(mapOllamaError(data.error || "", response.status));
     }
 
     const content = data.message?.content?.trim();
     if (!content) {
-      throw new Error("Ollama가 실행 중인지 확인하세요. Ollama returned an empty message.");
+      throw new Error(mapOllamaError("Ollama returned an empty message."));
     }
 
     return {
@@ -126,23 +138,34 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     async generateChat(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
       const history = payload.conversation?.messages
         .filter((message) => message.role !== "system")
-        .slice(-6)
+        .filter((message, index, messages) => {
+          const isLastMessage = index === messages.length - 1;
+          return !(isLastMessage && message.role === "user" && message.content.trim() === payload.message.trim());
+        })
+        .slice(-4)
         .map((message) => ({
           role: message.role,
-          content: message.content.slice(0, 1200)
+          content: message.content.slice(0, 700)
         }));
 
       const response = await chat(
         [
-          { role: "system", content: buildHeatherSystemPrompt(payload.settings) },
-          { role: "system", content: compactContext(payload) },
+          {
+            role: "system",
+            content: [
+              buildHeatherSystemPrompt(payload.settings),
+              "현재 Heather는 Ollama provider를 통해 로컬 모델로 답변 중이다.",
+              "응답은 사용자의 질문에 직접 답하고, 불필요한 내부 사고 과정을 쓰지 않는다."
+            ].join("\n")
+          },
+          { role: "system", content: compactContext(payload).slice(0, 1800) },
           ...(history || []),
           { role: "user", content: payload.message }
         ],
         {
           model: payload.settings.ollamaModel || defaultModel,
           temperature: 0.6,
-          maxTokens: 700
+          maxTokens: 320
         }
       );
 
@@ -162,16 +185,17 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
         body: JSON.stringify({
           model,
           stream: true,
+          think: false,
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 700
+            num_predict: options.maxTokens || 320
           }
         })
       });
 
       if (!response.ok || !response.body) {
-        throw new Error(`Ollama가 실행 중인지 확인하세요. (${response.status})`);
+        throw new Error(mapOllamaError("", response.status));
       }
 
       const reader = response.body.getReader();
@@ -209,14 +233,14 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           stream: false,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 700
+            num_predict: options.maxTokens || 320
           }
         })
       });
 
       const data = (await response.json()) as OllamaGenerateResponse;
       if (!response.ok) {
-        throw new Error(data.error || `Ollama가 실행 중인지 확인하세요. (${response.status})`);
+        throw new Error(mapOllamaError(data.error || "", response.status));
       }
 
       return {

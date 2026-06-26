@@ -36,3 +36,29 @@ export interface AIProviderConfig {
   model?: string;
   baseUrl?: string;
 }
+
+export interface TTSOptions {
+  voiceName?: string;
+  language?: string;
+  rate?: number;
+  pitch?: number;
+}
+
+export interface TTSProvider {
+  id: string;
+  speak(text: string, options?: TTSOptions): Promise<void>;
+  stop?(): void;
+  isAvailable(): Promise<boolean>;
+}
+
+export interface STTOptions {
+  language?: string;
+  interimResults?: boolean;
+}
+
+export interface STTProvider {
+  id: string;
+  transcribe(options?: STTOptions): AsyncIterable<string>;
+  stop?(): void;
+  isAvailable(): Promise<boolean>;
+}

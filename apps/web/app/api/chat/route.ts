@@ -25,6 +25,9 @@ globalThis.heatherChatCache = chatCache;
 const paidApiCounters = globalThis.heatherPaidApiCounters ?? new Map<string, number>();
 globalThis.heatherPaidApiCounters = paidApiCounters;
 
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
+
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as ChatRequestPayload;
@@ -54,8 +57,16 @@ export async function POST(request: Request) {
       }));
     }
 
-    const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || payload.settings.ollamaBaseUrl;
-    const ollamaModel = payload.settings.ollamaModel || process.env.OLLAMA_MODEL;
+    const ollamaBaseUrl =
+      process.env.HEATHER_OLLAMA_BASE_URL ||
+      process.env.OLLAMA_BASE_URL ||
+      payload.settings.ollamaBaseUrl ||
+      DEFAULT_OLLAMA_BASE_URL;
+    const ollamaModel =
+      process.env.HEATHER_OLLAMA_MODEL ||
+      process.env.OLLAMA_MODEL ||
+      payload.settings.ollamaModel ||
+      DEFAULT_OLLAMA_MODEL;
 
     if (ollamaBaseUrl) {
       try {
@@ -66,25 +77,27 @@ export async function POST(request: Request) {
           provider: "ollama"
         }));
       } catch (error) {
-        if (payload.settings.aiMode === "local_model") {
-          const localResponse = await localProvider.generateChat(payload);
-          return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
-            ...localResponse,
-            provider: "local-heather",
-            providerWarning:
-              error instanceof Error ? error.message : "Local model failed, local Heather fallback used."
-          }));
+        if (payload.settings.aiMode === "local_model" || payload.settings.aiMode === "cloud_allowed") {
+          return NextResponse.json(
+            {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요."
+            },
+            { status: 503 }
+          );
         }
       }
     }
 
     if (payload.settings.aiMode === "local_model") {
-      const localResponse = await localProvider.generateChat(payload);
-      return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
-        ...localResponse,
-        provider: "local-heather",
-        providerWarning: "OLLAMA_BASE_URL is not configured. Local Heather fallback used."
-      }));
+      return NextResponse.json(
+        {
+          error: "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행하세요."
+        },
+        { status: 503 }
+      );
     }
 
     const openAIKey = process.env.OPENAI_API_KEY;
@@ -165,6 +178,8 @@ function createCacheKey(payload: ChatRequestPayload): string {
     message: payload.message.trim().toLowerCase(),
     tone: payload.settings.tone,
     aiMode: payload.settings.aiMode,
+    ollamaBaseUrl: payload.settings.ollamaBaseUrl,
+    ollamaModel: payload.settings.ollamaModel,
     memories: payload.memories
       .filter((memory) => !memory.archived)
       .slice(0, 6)

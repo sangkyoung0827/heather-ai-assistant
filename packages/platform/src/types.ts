@@ -13,6 +13,8 @@ export interface SystemInfo {
   osName: string;
   appVersion: string;
   homeLabel: string;
+  cpuSummary: string;
+  memorySummary: string;
 }
 
 export interface AllowedDirectory {

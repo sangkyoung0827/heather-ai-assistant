@@ -8,14 +8,23 @@ use std::{
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, State, WindowEvent,
+};
+use tauri_plugin_global_shortcut::{
+    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+};
 use walkdir::WalkDir;
 
 const MAX_TEXT_FILE_BYTES: u64 = 1_000_000;
 const MAX_SEARCH_RESULTS: usize = 200;
 const MAX_WALK_ENTRIES: usize = 5_000;
 const SAFE_TEXT_EXTENSIONS: &[&str] = &["txt", "md", "csv", "json", "log"];
-const SAFE_SEARCH_EXTENSIONS: &[&str] = &["pdf", "docx", "txt", "md", "png", "jpg", "jpeg"];
+const SAFE_SEARCH_EXTENSIONS: &[&str] = &[
+    "pdf", "docx", "txt", "md", "csv", "json", "png", "jpg", "jpeg",
+];
 const APP_ALLOWLIST: &[(&str, &str)] = &[
     ("Chrome", "Google Chrome"),
     ("Safari", "Safari"),
@@ -36,6 +45,8 @@ struct SystemInfo {
     os_name: String,
     app_version: String,
     home_label: String,
+    cpu_summary: String,
+    memory_summary: String,
 }
 
 #[derive(Serialize)]
@@ -77,6 +88,8 @@ fn get_system_info(app: AppHandle) -> SystemInfo {
         os_name: std::env::consts::OS.to_string(),
         app_version: app.package_info().version.to_string(),
         home_label: "Home folder".to_string(),
+        cpu_summary: format!("{} logical CPU(s)", available_parallelism()),
+        memory_summary: "Memory total is not exposed in Heather desktop v1".to_string(),
     }
 }
 
@@ -262,6 +275,32 @@ fn set_clipboard_text(text: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(DesktopState::default())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    let mac_shortcut =
+                        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyH);
+                    let other_shortcut =
+                        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyH);
+                    if event.state == ShortcutState::Pressed
+                        && (*shortcut == mac_shortcut || *shortcut == other_shortcut)
+                    {
+                        show_main_window(app);
+                    }
+                })
+                .build(),
+        )
+        .setup(|app| {
+            setup_tray(app.handle())?;
+            register_global_shortcuts(app.handle())?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_system_info,
             choose_directory,
@@ -275,6 +314,74 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Heather AI Assistant");
+}
+
+fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Open Heather", true, None::<&str>)?;
+    let quick = MenuItem::with_id(app, "quick_ask", "Quick Ask / Focus Heather", true, None::<&str>)?;
+    let local_control = MenuItem::with_id(app, "local_control", "Local Control", true, None::<&str>)?;
+    let voice_settings = MenuItem::with_id(app, "voice_settings", "Voice Settings", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Heather", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quick, &local_control, &voice_settings, &quit])?;
+
+    let mut tray_builder = TrayIconBuilder::new()
+        .tooltip("Heather AI Assistant")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" | "quick_ask" => show_main_window(app),
+            "local_control" => {
+                show_main_window(app);
+                let _ = app.emit("heather://open-view", "local_control");
+            }
+            "voice_settings" => {
+                show_main_window(app);
+                let _ = app.emit("heather://open-view", "settings");
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
+    }
+
+    tray_builder.build(app)?;
+    Ok(())
+}
+
+fn register_global_shortcuts(app: &AppHandle) -> tauri::Result<()> {
+    let mac_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyH);
+    let other_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyH);
+    let shortcuts = app.global_shortcut();
+
+    if let Err(error) = shortcuts.register(mac_shortcut) {
+        eprintln!("Heather shortcut Command+Shift+H registration failed: {error}");
+    }
+
+    if let Err(error) = shortcuts.register(other_shortcut) {
+        eprintln!("Heather shortcut Ctrl+Shift+H registration failed: {error}");
+    }
+
+    Ok(())
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
 
 fn resolve_allowed_dir(folder_id: &str, state: &State<DesktopState>) -> Result<PathBuf, String> {
@@ -377,6 +484,12 @@ fn make_id(prefix: &str) -> String {
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
     format!("{prefix}_{millis}")
+}
+
+fn available_parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(1)
 }
 
 fn open_url_with_system(url: &str) -> Result<(), String> {
