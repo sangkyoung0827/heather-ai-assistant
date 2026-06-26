@@ -2,6 +2,7 @@ import {
   buildTeachingContext,
   buildHeatherSystemPrompt,
   classifyActionRisk,
+  describeAutomationRecipe,
   generateConversationTitle
 } from "@heather/core";
 import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
@@ -35,12 +36,21 @@ function buildContext(payload: ChatRequestPayload): string {
     )
     .join("\n");
 
+  const automationContext = (payload.automationRecipes || [])
+    .filter((recipe) => recipe.enabled)
+    .slice(0, 4)
+    .map((recipe) => describeAutomationRecipe(recipe).slice(0, 520))
+    .join("\n\n");
+
   return [
     "저장된 기억:",
     memoryContext || "- 아직 연결된 기억이 없습니다.",
     "",
     "프로젝트:",
     projectContext || "- 아직 프로젝트가 없습니다.",
+    "",
+    "자동화 루틴:",
+    automationContext || "- 아직 저장된 자동화 루틴이 없습니다.",
     "",
     buildTeachingContext(payload.teachings)
   ].join("\n");

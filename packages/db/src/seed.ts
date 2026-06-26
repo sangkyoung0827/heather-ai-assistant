@@ -1,5 +1,11 @@
-import { createId, nowIso } from "@heather/core";
-import type { HeatherSettings, MemoryRecord, ProjectRecord, TeachingRecord } from "@heather/core";
+import { createDefaultJarvisRecipe, createId, nowIso } from "@heather/core";
+import type {
+  AutomationRecipe,
+  HeatherSettings,
+  MemoryRecord,
+  ProjectRecord,
+  TeachingRecord
+} from "@heather/core";
 
 export function createDefaultSettings(): HeatherSettings {
   return {
@@ -159,6 +165,32 @@ export function createSeedTeachings(): TeachingRecord[] {
     },
     {
       id: createId("teaching"),
+      type: "skill",
+      title: "Jarvis식 개인 자동화 루틴",
+      content:
+        "개인 AI가 컴퓨터를 조작할 때는 트리거, 행동 순서, 실행 권한, 확인 정책을 분리한다. 웹에서 가능한 URL 열기/브라우저 음성은 즉시 실행하고, 로컬 앱 실행/화면 읽기/파일 접근은 데스크톱 브리지와 명시 권한이 필요하다고 표시한다.",
+      source: "jarvis_inspired_architecture",
+      confidence: 0.86,
+      tags: ["automation", "jarvis", "desktop-bridge", "voice"],
+      active: true,
+      created_at: timestamp,
+      updated_at: timestamp
+    },
+    {
+      id: createId("teaching"),
+      type: "boundary_rule",
+      title: "자동화 안전 확인 기준",
+      content:
+        "헤더는 결제, 삭제, 파일 쓰기, 계정 변경, 외부 메시지 전송처럼 되돌리기 어렵거나 타인에게 영향을 주는 행동을 사용자의 명시 확인 없이 실행하지 않는다.",
+      source: "jarvis_inspired_architecture",
+      confidence: 0.94,
+      tags: ["automation", "safety", "confirmation"],
+      active: true,
+      created_at: timestamp,
+      updated_at: timestamp
+    },
+    {
+      id: createId("teaching"),
       type: "boundary_rule",
       title: "좋은 기회와 업무 전가의 경계",
       content:
@@ -171,4 +203,8 @@ export function createSeedTeachings(): TeachingRecord[] {
       updated_at: timestamp
     }
   ];
+}
+
+export function createSeedAutomationRecipes(): AutomationRecipe[] {
+  return [createDefaultJarvisRecipe()];
 }

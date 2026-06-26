@@ -1,4 +1,5 @@
 import type {
+  AutomationRecipe,
   Conversation,
   HeatherSettings,
   MemoryRecord,
@@ -21,6 +22,9 @@ export interface HeatherDatabase {
   listTeachings(): Promise<TeachingRecord[]>;
   saveTeaching(teaching: TeachingRecord): Promise<void>;
   deleteTeaching(id: string): Promise<void>;
+  listAutomationRecipes(): Promise<AutomationRecipe[]>;
+  saveAutomationRecipe(recipe: AutomationRecipe): Promise<void>;
+  deleteAutomationRecipe(id: string): Promise<void>;
   clearAll(): Promise<void>;
 }
 

@@ -5,7 +5,8 @@ import type {
   ConversationMessage,
   HeatherSettings,
   MemoryRecord,
-  ProjectRecord
+  ProjectRecord,
+  AutomationRecipe
 } from "./types";
 import { classifyActionRisk } from "./safety";
 import {
@@ -107,7 +108,11 @@ function pickRelevantProjects(message: string, projects: ProjectRecord[]): Proje
     .slice(0, 3);
 }
 
-function buildContextLine(memories: MemoryRecord[], projects: ProjectRecord[]): string {
+function buildContextLine(
+  memories: MemoryRecord[],
+  projects: ProjectRecord[],
+  automationRecipes: AutomationRecipe[] = []
+): string {
   const memoryLine = memories.length
     ? `기억 맥락: ${memories.map((memory) => memory.content).join(" / ")}`
     : "기억 맥락: 아직 직접 연결되는 장기 기억은 많지 않음";
@@ -116,7 +121,14 @@ function buildContextLine(memories: MemoryRecord[], projects: ProjectRecord[]): 
     ? `프로젝트 맥락: ${projects.map((project) => `${project.title}(${project.status})`).join(", ")}`
     : "프로젝트 맥락: 특정 프로젝트로 고정되지 않음";
 
-  return `${memoryLine}\n${projectLine}`;
+  const automationLine = automationRecipes.length
+    ? `자동화 루틴: ${automationRecipes
+        .slice(0, 3)
+        .map((recipe) => `${recipe.title}(${recipe.trigger.label || recipe.trigger.type})`)
+        .join(", ")}`
+    : "자동화 루틴: 아직 저장된 루틴이 많지 않음";
+
+  return `${memoryLine}\n${projectLine}\n${automationLine}`;
 }
 
 export function createLocalHeatherResponse(payload: ChatRequestPayload): ChatResponsePayload {
@@ -129,7 +141,11 @@ export function createLocalHeatherResponse(payload: ChatRequestPayload): ChatRes
   const relevantProjects = payload.settings.projectMemoryEnabled
     ? pickRelevantProjects(payload.message, payload.projects)
     : [];
-  const contextLine = buildContextLine(relevantMemories, relevantProjects);
+  const contextLine = buildContextLine(
+    relevantMemories,
+    relevantProjects,
+    payload.automationRecipes
+  );
 
   const confirmation = risk.requiresConfirmation
     ? "\n\n이 요청에는 확인이 필요한 작업이 섞여 있을 수 있어요. 실제 실행 단계로 넘어가기 전에 범위와 되돌릴 방법을 먼저 확정하겠습니다."

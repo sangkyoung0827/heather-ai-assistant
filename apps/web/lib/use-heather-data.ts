@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  AutomationRecipe,
   Conversation,
   HeatherSettings,
   MemoryRecord,
@@ -28,14 +29,23 @@ export function useHeatherData() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [teachings, setTeachings] = useState<TeachingRecord[]>([]);
+  const [automationRecipes, setAutomationRecipes] = useState<AutomationRecipe[]>([]);
 
   const reload = useCallback(async () => {
-    const [nextSettings, nextConversations, nextProjects, nextMemories, nextTeachings] = await Promise.all([
+    const [
+      nextSettings,
+      nextConversations,
+      nextProjects,
+      nextMemories,
+      nextTeachings,
+      nextAutomationRecipes
+    ] = await Promise.all([
       db.getSettings(),
       db.listConversations(),
       db.listProjects(),
       db.listMemories(),
-      db.listTeachings()
+      db.listTeachings(),
+      db.listAutomationRecipes()
     ]);
 
     setSettings(nextSettings);
@@ -43,6 +53,7 @@ export function useHeatherData() {
     setProjects(sortByUpdated(nextProjects));
     setMemories(sortByUpdated(nextMemories));
     setTeachings(sortByUpdated(nextTeachings));
+    setAutomationRecipes(sortByUpdated(nextAutomationRecipes));
     setReady(true);
   }, [db]);
 
@@ -122,6 +133,22 @@ export function useHeatherData() {
     [db]
   );
 
+  const saveAutomationRecipe = useCallback(
+    async (recipe: AutomationRecipe) => {
+      setAutomationRecipes((current) => sortByUpdated(upsert(current, recipe)));
+      await db.saveAutomationRecipe(recipe);
+    },
+    [db]
+  );
+
+  const deleteAutomationRecipe = useCallback(
+    async (id: string) => {
+      setAutomationRecipes((current) => current.filter((recipe) => recipe.id !== id));
+      await db.deleteAutomationRecipe(id);
+    },
+    [db]
+  );
+
   const clearAll = useCallback(async () => {
     await db.clearAll();
     await reload();
@@ -134,6 +161,7 @@ export function useHeatherData() {
     projects,
     memories,
     teachings,
+    automationRecipes,
     saveSettings,
     saveConversation,
     deleteConversation,
@@ -143,6 +171,8 @@ export function useHeatherData() {
     deleteMemory,
     saveTeaching,
     deleteTeaching,
+    saveAutomationRecipe,
+    deleteAutomationRecipe,
     clearAll,
     reload
   };

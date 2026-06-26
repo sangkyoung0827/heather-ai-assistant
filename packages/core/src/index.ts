@@ -1,4 +1,5 @@
 export * from "./analysis";
+export * from "./automation";
 export * from "./briefing";
 export * from "./conversation";
 export * from "./learning";

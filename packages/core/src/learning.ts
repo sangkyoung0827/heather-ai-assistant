@@ -55,6 +55,26 @@ export const GENERATIVE_TOOLS: GenerativeTool[] = [
     description: "이미지 생성 모델에 넣을 장면, 스타일, 품질 지시를 구성합니다.",
     keywords: ["이미지", "그림", "사진", "로고", "일러스트", "생성", "배경", "디자인"],
     outputContract: ["장면", "스타일", "구도", "색감", "negative prompt"]
+  },
+  {
+    id: "automation_planner",
+    name: "개인 자동화 설계",
+    description: "Jarvis식 루틴, 앱 실행, 음성/클랩 트리거, 안전 확인 정책을 설계합니다.",
+    keywords: [
+      "자동화",
+      "루틴",
+      "jarvis",
+      "자비스",
+      "더블클랩",
+      "클랩",
+      "앱 실행",
+      "컴퓨터 조작",
+      "비서",
+      "브리지",
+      "desktop",
+      "데스크톱"
+    ],
+    outputContract: ["트리거", "행동 순서", "웹/데스크톱 구분", "확인 정책", "훈련 방법"]
   }
 ];
 
@@ -193,6 +213,15 @@ function draftByTool(toolId: GenerativeToolId, input: string): string[] {
       "2. Composition: 카메라 거리, 구도, 배경의 역할을 지정합니다.",
       "3. Style: 매체, 조명, 색감, 질감을 구체화합니다.",
       "4. Negative: 흐림, 잘린 텍스트, 왜곡된 손, 과한 장식을 제외합니다."
+    ];
+  }
+
+  if (toolId === "automation_planner") {
+    return [
+      "1. 트리거: 지금은 버튼/브라우저 음성으로 시작하고, 더블클랩과 웨이크워드는 데스크톱 브리지에서 붙입니다.",
+      "2. 행동 순서: 웹 주소 열기와 브라우저 음성은 즉시 실행하고, 로컬 앱 실행/화면 읽기/파일 접근은 데스크톱 전용으로 표시합니다.",
+      "3. 안전 확인: 결제, 삭제, 파일 쓰기, 메시지 전송, 계정 조작은 반드시 사용자의 명시 확인 뒤 실행합니다.",
+      "4. 훈련 방법: 성공한 루틴은 example로 저장하고, 틀린 행동 순서나 위험 기준은 correction 또는 boundary_rule로 저장합니다."
     ];
   }
 

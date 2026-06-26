@@ -20,6 +20,7 @@ import {
   nowIso
 } from "@heather/core";
 import type {
+  AutomationRecipe,
   ChatRequestPayload,
   ChatResponsePayload,
   Conversation,
@@ -34,6 +35,7 @@ interface ChatPanelProps {
   memories: MemoryRecord[];
   projects: ProjectRecord[];
   teachings: TeachingRecord[];
+  automationRecipes: AutomationRecipe[];
   settings: HeatherSettings;
   onSaveConversation: (conversation: Conversation) => Promise<void>;
   onDeleteConversation: (id: string) => Promise<void>;
@@ -82,6 +84,7 @@ export function ChatPanel({
   memories,
   projects,
   teachings,
+  automationRecipes,
   settings,
   onSaveConversation,
   onDeleteConversation,
@@ -168,7 +171,8 @@ export function ChatPanel({
         settings,
         memories,
         projects,
-        teachings
+        teachings,
+        automationRecipes
       };
       const data = await resolveHeatherResponse(payload);
 
@@ -552,6 +556,17 @@ function cacheKey(payload: ChatRequestPayload): string {
       .filter((teaching) => teaching.active)
       .slice(0, 6)
       .map((teaching) => [teaching.type, teaching.title, teaching.content.slice(0, 180), teaching.tags]),
+    automationRecipes: (payload.automationRecipes || [])
+      .filter((recipe) => recipe.enabled)
+      .slice(0, 4)
+      .map((recipe) => [
+        recipe.title,
+        recipe.trigger.type,
+        recipe.actions
+          .filter((action) => action.enabled)
+          .slice(0, 5)
+          .map((action) => [action.type, action.label, action.desktopOnly])
+      ]),
     history: payload.conversation?.messages
       .filter((message) => message.role !== "system")
       .slice(-4)

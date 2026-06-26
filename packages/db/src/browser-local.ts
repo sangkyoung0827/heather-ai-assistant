@@ -1,4 +1,5 @@
 import type {
+  AutomationRecipe,
   Conversation,
   HeatherSettings,
   MemoryRecord,
@@ -7,6 +8,7 @@ import type {
 } from "@heather/core";
 import {
   createDefaultSettings,
+  createSeedAutomationRecipes,
   createSeedMemories,
   createSeedProjects,
   createSeedTeachings
@@ -15,7 +17,7 @@ import type { HeatherDatabase } from "./types";
 
 const STORAGE_PREFIX = "heather.ai";
 
-type CollectionName = "conversations" | "projects" | "memories" | "teachings";
+type CollectionName = "conversations" | "projects" | "memories" | "teachings" | "automationRecipes";
 
 function storage(): Storage {
   if (typeof window === "undefined") {
@@ -154,11 +156,32 @@ export class BrowserHeatherDatabase implements HeatherDatabase {
     );
   }
 
+  async listAutomationRecipes(): Promise<AutomationRecipe[]> {
+    const recipes = readCollection<AutomationRecipe>("automationRecipes", []);
+    if (recipes.length) return recipes;
+
+    const seeded = createSeedAutomationRecipes();
+    writeJson("automationRecipes", seeded);
+    return seeded;
+  }
+
+  async saveAutomationRecipe(recipe: AutomationRecipe): Promise<void> {
+    writeJson("automationRecipes", upsert(await this.listAutomationRecipes(), recipe));
+  }
+
+  async deleteAutomationRecipe(id: string): Promise<void> {
+    writeJson(
+      "automationRecipes",
+      (await this.listAutomationRecipes()).filter((recipe) => recipe.id !== id)
+    );
+  }
+
   async clearAll(): Promise<void> {
     storage().removeItem(key("settings"));
     storage().removeItem(key("conversations"));
     storage().removeItem(key("projects"));
     storage().removeItem(key("memories"));
     storage().removeItem(key("teachings"));
+    storage().removeItem(key("automationRecipes"));
   }
 }

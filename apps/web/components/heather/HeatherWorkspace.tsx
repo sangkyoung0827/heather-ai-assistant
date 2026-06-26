@@ -13,12 +13,14 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  Users
+  Users,
+  Zap
 } from "lucide-react";
 import { PLATFORM_CAPABILITIES } from "@heather/core";
 import { useHeatherData } from "../../lib/use-heather-data";
 import { registerHeatherServiceWorker } from "../../lib/pwa";
 import { AnalysisPanel } from "./panels/AnalysisPanel";
+import { AutomationPanel } from "./panels/AutomationPanel";
 import { BriefingPanel } from "./panels/BriefingPanel";
 import { ChatPanel } from "./panels/ChatPanel";
 import { MemoryPanel } from "./panels/MemoryPanel";
@@ -31,6 +33,7 @@ export type HeatherView =
   | "chat"
   | "projects"
   | "memory"
+  | "automation"
   | "training"
   | "analysis"
   | "settings";
@@ -46,6 +49,7 @@ const NAVIGATION: NavigationItem[] = [
   { id: "chat", label: "채팅", icon: MessageSquare },
   { id: "projects", label: "프로젝트", icon: FolderKanban },
   { id: "memory", label: "메모리", icon: Database },
+  { id: "automation", label: "Jarvis 루틴", icon: Zap },
   { id: "training", label: "학습/생성", icon: Sparkles },
   { id: "analysis", label: "사람/조직 분석", icon: Users },
   { id: "settings", label: "설정", icon: Settings }
@@ -117,6 +121,10 @@ export function HeatherWorkspace() {
               <strong className="text-ink">{data.teachings.filter((teaching) => teaching.active).length}</strong>
             </div>
             <div className="flex items-center justify-between">
+              <span>자동화 루틴</span>
+              <strong className="text-ink">{data.automationRecipes.filter((recipe) => recipe.enabled).length}</strong>
+            </div>
+            <div className="flex items-center justify-between">
               <span>웹 기능</span>
               <strong className="text-ink">{availableCapabilities}</strong>
             </div>
@@ -159,6 +167,7 @@ export function HeatherWorkspace() {
                     memories={data.memories}
                     projects={data.projects}
                     teachings={data.teachings}
+                    automationRecipes={data.automationRecipes}
                     settings={data.settings}
                     onSaveConversation={data.saveConversation}
                     onDeleteConversation={data.deleteConversation}
@@ -178,6 +187,13 @@ export function HeatherWorkspace() {
                     memories={data.memories}
                     onSaveMemory={data.saveMemory}
                     onDeleteMemory={data.deleteMemory}
+                  />
+                )}
+                {activeView === "automation" && (
+                  <AutomationPanel
+                    recipes={data.automationRecipes}
+                    onSaveRecipe={data.saveAutomationRecipe}
+                    onDeleteRecipe={data.deleteAutomationRecipe}
                   />
                 )}
                 {activeView === "training" && (

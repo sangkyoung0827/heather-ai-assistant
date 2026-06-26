@@ -15,7 +15,23 @@ export type GenerativeToolId =
   | "relationship_analyst"
   | "decision_comparator"
   | "prompt_designer"
-  | "image_prompt";
+  | "image_prompt"
+  | "automation_planner";
+
+export type AutomationTriggerType =
+  | "manual"
+  | "voice"
+  | "double_clap"
+  | "schedule";
+
+export type AutomationActionType =
+  | "open_url"
+  | "open_app"
+  | "speak"
+  | "focus_app"
+  | "capture_screen"
+  | "clipboard_read"
+  | "clipboard_write";
 
 export type MemoryType =
   | "user_profile"
@@ -105,6 +121,51 @@ export interface GenerativeRun {
   created_at: string;
 }
 
+export interface AutomationTrigger {
+  type: AutomationTriggerType;
+  label: string;
+  phrase?: string;
+  schedule?: string;
+}
+
+export interface AutomationAction {
+  id: string;
+  type: AutomationActionType;
+  label: string;
+  value: string;
+  enabled: boolean;
+  desktopOnly: boolean;
+  requiresConfirmation: boolean;
+}
+
+export interface AutomationRecipe {
+  id: string;
+  title: string;
+  description: string;
+  trigger: AutomationTrigger;
+  welcomeMessage: string;
+  actions: AutomationAction[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationExecutionStep {
+  actionId: string;
+  label: string;
+  type: AutomationActionType;
+  status: "ready" | "webExecutable" | "desktopOnly" | "needsConfirmation" | "disabled";
+  reason: string;
+}
+
+export interface AutomationPlan {
+  recipeId: string;
+  title: string;
+  triggerLabel: string;
+  summary: string;
+  steps: AutomationExecutionStep[];
+}
+
 export interface HeatherSettings {
   tone: HeatherTone;
   aiMode: HeatherAIMode;
@@ -169,6 +230,7 @@ export interface ChatRequestPayload {
   memories: MemoryRecord[];
   projects: ProjectRecord[];
   teachings?: TeachingRecord[];
+  automationRecipes?: AutomationRecipe[];
 }
 
 export interface ChatResponsePayload {

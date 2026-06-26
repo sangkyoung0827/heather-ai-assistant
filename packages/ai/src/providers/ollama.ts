@@ -2,6 +2,7 @@ import {
   buildTeachingContext,
   buildHeatherSystemPrompt,
   classifyActionRisk,
+  describeAutomationRecipe,
   generateConversationTitle
 } from "@heather/core";
 import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
@@ -26,12 +27,21 @@ function compactContext(payload: ChatRequestPayload): string {
     .map((project) => `- ${project.title}: ${project.status}/${project.priority}`)
     .join("\n");
 
+  const automationRecipes = (payload.automationRecipes || [])
+    .filter((recipe) => recipe.enabled)
+    .slice(0, 4)
+    .map((recipe) => describeAutomationRecipe(recipe).slice(0, 420))
+    .join("\n\n");
+
   return [
     "로컬 장기 기억:",
     memories || "- 없음",
     "",
     "프로젝트:",
     projects || "- 없음",
+    "",
+    "자동화 루틴:",
+    automationRecipes || "- 없음",
     "",
     buildTeachingContext(payload.teachings)
   ].join("\n");
