@@ -1,0 +1,19 @@
+{
+  "name": "heather-ai-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Heather AI Assistant monorepo for a modular personal assistant web app and future desktop shell.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @heather/web",
+    "build": "npm run build -w @heather/web",
+    "lint": "npm run lint -w @heather/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
