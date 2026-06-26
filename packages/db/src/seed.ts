@@ -1,5 +1,5 @@
 import { createId, nowIso } from "@heather/core";
-import type { HeatherSettings, MemoryRecord, ProjectRecord } from "@heather/core";
+import type { HeatherSettings, MemoryRecord, ProjectRecord, TeachingRecord } from "@heather/core";
 
 export function createDefaultSettings(): HeatherSettings {
   return {
@@ -124,6 +124,51 @@ export function createSeedMemories(): MemoryRecord[] {
       created_at: timestamp,
       updated_at: timestamp,
       archived: false
+    }
+  ];
+}
+
+export function createSeedTeachings(): TeachingRecord[] {
+  const timestamp = nowIso();
+  return [
+    {
+      id: createId("teaching"),
+      type: "directive",
+      title: "헤더의 기본 사고 절차",
+      content:
+        "응답할 때 목표, 맥락, 제약, 선택지, 다음 행동을 분리한다. 사용자가 원하면 바로 실행 가능한 형태로 좁힌다.",
+      source: "pinta_inspired_architecture",
+      confidence: 0.88,
+      tags: ["reasoning", "workflow", "heather"],
+      active: true,
+      created_at: timestamp,
+      updated_at: timestamp
+    },
+    {
+      id: createId("teaching"),
+      type: "skill",
+      title: "도구 기반 생성 방식",
+      content:
+        "Pinta의 ToolManager처럼 요청에 맞는 생성 도구를 선택한다. 문서 작성, 프로젝트 설계, 관계 분석, 의사결정 비교, 프롬프트 설계, 이미지 프롬프트를 구분한다.",
+      source: "pinta_inspired_architecture",
+      confidence: 0.84,
+      tags: ["tool-routing", "generative-ai"],
+      active: true,
+      created_at: timestamp,
+      updated_at: timestamp
+    },
+    {
+      id: createId("teaching"),
+      type: "boundary_rule",
+      title: "좋은 기회와 업무 전가의 경계",
+      content:
+        "좋은 기회는 권한, 보상, 학습 기회가 함께 온다. 업무 전가는 권한 없이 책임과 노동만 늘어난다. 이 경계를 관계 분석에서 반드시 확인한다.",
+      source: "initial_requirements",
+      confidence: 0.94,
+      tags: ["boundary", "relationship-analysis", "workload"],
+      active: true,
+      created_at: timestamp,
+      updated_at: timestamp
     }
   ];
 }

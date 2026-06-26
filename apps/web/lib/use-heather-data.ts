@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Conversation, HeatherSettings, MemoryRecord, ProjectRecord } from "@heather/core";
+import type {
+  Conversation,
+  HeatherSettings,
+  MemoryRecord,
+  ProjectRecord,
+  TeachingRecord
+} from "@heather/core";
 import { BrowserHeatherDatabase, createDefaultSettings } from "@heather/db";
 
 function sortByUpdated<T extends { updated_at?: string; updatedAt?: string; created_at?: string; createdAt?: string }>(
@@ -21,19 +27,22 @@ export function useHeatherData() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [teachings, setTeachings] = useState<TeachingRecord[]>([]);
 
   const reload = useCallback(async () => {
-    const [nextSettings, nextConversations, nextProjects, nextMemories] = await Promise.all([
+    const [nextSettings, nextConversations, nextProjects, nextMemories, nextTeachings] = await Promise.all([
       db.getSettings(),
       db.listConversations(),
       db.listProjects(),
-      db.listMemories()
+      db.listMemories(),
+      db.listTeachings()
     ]);
 
     setSettings(nextSettings);
     setConversations(sortByUpdated(nextConversations));
     setProjects(sortByUpdated(nextProjects));
     setMemories(sortByUpdated(nextMemories));
+    setTeachings(sortByUpdated(nextTeachings));
     setReady(true);
   }, [db]);
 
@@ -97,6 +106,22 @@ export function useHeatherData() {
     [db]
   );
 
+  const saveTeaching = useCallback(
+    async (teaching: TeachingRecord) => {
+      setTeachings((current) => sortByUpdated(upsert(current, teaching)));
+      await db.saveTeaching(teaching);
+    },
+    [db]
+  );
+
+  const deleteTeaching = useCallback(
+    async (id: string) => {
+      setTeachings((current) => current.filter((teaching) => teaching.id !== id));
+      await db.deleteTeaching(id);
+    },
+    [db]
+  );
+
   const clearAll = useCallback(async () => {
     await db.clearAll();
     await reload();
@@ -108,6 +133,7 @@ export function useHeatherData() {
     conversations,
     projects,
     memories,
+    teachings,
     saveSettings,
     saveConversation,
     deleteConversation,
@@ -115,6 +141,8 @@ export function useHeatherData() {
     deleteProject,
     saveMemory,
     deleteMemory,
+    saveTeaching,
+    deleteTeaching,
     clearAll,
     reload
   };

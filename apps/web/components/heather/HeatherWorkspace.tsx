@@ -12,6 +12,7 @@ import {
   Mic,
   Settings,
   ShieldCheck,
+  Sparkles,
   Users
 } from "lucide-react";
 import { PLATFORM_CAPABILITIES } from "@heather/core";
@@ -23,8 +24,16 @@ import { ChatPanel } from "./panels/ChatPanel";
 import { MemoryPanel } from "./panels/MemoryPanel";
 import { ProjectsPanel } from "./panels/ProjectsPanel";
 import { SettingsPanel } from "./panels/SettingsPanel";
+import { TrainingPanel } from "./panels/TrainingPanel";
 
-export type HeatherView = "briefing" | "chat" | "projects" | "memory" | "analysis" | "settings";
+export type HeatherView =
+  | "briefing"
+  | "chat"
+  | "projects"
+  | "memory"
+  | "training"
+  | "analysis"
+  | "settings";
 
 interface NavigationItem {
   id: HeatherView;
@@ -37,6 +46,7 @@ const NAVIGATION: NavigationItem[] = [
   { id: "chat", label: "채팅", icon: MessageSquare },
   { id: "projects", label: "프로젝트", icon: FolderKanban },
   { id: "memory", label: "메모리", icon: Database },
+  { id: "training", label: "학습/생성", icon: Sparkles },
   { id: "analysis", label: "사람/조직 분석", icon: Users },
   { id: "settings", label: "설정", icon: Settings }
 ];
@@ -103,6 +113,10 @@ export function HeatherWorkspace() {
               <strong className="text-ink">{data.memories.filter((memory) => !memory.archived).length}</strong>
             </div>
             <div className="flex items-center justify-between">
+              <span>교육 기록</span>
+              <strong className="text-ink">{data.teachings.filter((teaching) => teaching.active).length}</strong>
+            </div>
+            <div className="flex items-center justify-between">
               <span>웹 기능</span>
               <strong className="text-ink">{availableCapabilities}</strong>
             </div>
@@ -144,6 +158,7 @@ export function HeatherWorkspace() {
                     conversations={data.conversations}
                     memories={data.memories}
                     projects={data.projects}
+                    teachings={data.teachings}
                     settings={data.settings}
                     onSaveConversation={data.saveConversation}
                     onDeleteConversation={data.deleteConversation}
@@ -163,6 +178,15 @@ export function HeatherWorkspace() {
                     memories={data.memories}
                     onSaveMemory={data.saveMemory}
                     onDeleteMemory={data.deleteMemory}
+                  />
+                )}
+                {activeView === "training" && (
+                  <TrainingPanel
+                    teachings={data.teachings}
+                    memories={data.memories}
+                    projects={data.projects}
+                    onSaveTeaching={data.saveTeaching}
+                    onDeleteTeaching={data.deleteTeaching}
                   />
                 )}
                 {activeView === "analysis" && (

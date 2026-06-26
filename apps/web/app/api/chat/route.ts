@@ -177,6 +177,15 @@ function createCacheKey(payload: ChatRequestPayload): string {
         project.priority,
         project.next_actions.slice(0, 4)
       ]),
+    teachings: (payload.teachings || [])
+      .filter((teaching) => teaching.active)
+      .slice(0, 6)
+      .map((teaching) => [
+        teaching.type,
+        teaching.title,
+        teaching.content.slice(0, 240),
+        teaching.tags
+      ]),
     history: payload.conversation?.messages
       .filter((message) => message.role !== "system")
       .slice(-4)

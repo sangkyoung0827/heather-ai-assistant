@@ -8,6 +8,11 @@ import type {
   ProjectRecord
 } from "./types";
 import { classifyActionRisk } from "./safety";
+import {
+  createGenerativeDraft,
+  pickRelevantTeachings,
+  selectGenerativeTool
+} from "./learning";
 
 export function createId(prefix: string): string {
   const random = Math.random().toString(36).slice(2, 10);
@@ -116,6 +121,8 @@ function buildContextLine(memories: MemoryRecord[], projects: ProjectRecord[]): 
 
 export function createLocalHeatherResponse(payload: ChatRequestPayload): ChatResponsePayload {
   const risk = classifyActionRisk(payload.message);
+  const selectedTool = selectGenerativeTool(payload.message);
+  const relevantTeachings = pickRelevantTeachings(payload.message, payload.teachings);
   const relevantMemories = payload.settings.memoryEnabled
     ? pickRelevantMemories(payload.message, payload.memories)
     : [];
@@ -132,16 +139,18 @@ export function createLocalHeatherResponse(payload: ChatRequestPayload): ChatRes
     toneLead(payload.settings),
     "",
     contextLine,
+    relevantTeachings.length
+      ? `교육 맥락: ${relevantTeachings.map((teaching) => teaching.title).join(", ")}`
+      : "교육 맥락: 아직 이 요청에 직접 연결되는 교육 기록은 적음",
     "",
-    "내 판단:",
-    `- 지금 요청의 핵심은 "${payload.message.trim()}"를 실행 가능한 구조로 바꾸는 것입니다.`,
-    "- 먼저 목표, 제약, 다음 행동을 분리하고, 이미 저장된 프로젝트/기억과 충돌하는 지점을 확인하는 편이 좋습니다.",
-    "- 제가 바로 도울 수 있는 부분은 대화 정리, 프로젝트 메모리 갱신, 사람/조직 분석, 문서 초안, 오늘의 우선순위 재정렬입니다.",
+    createGenerativeDraft({
+      input: payload.message,
+      tool: selectedTool,
+      teachings: payload.teachings,
+      memories: relevantMemories,
+      projects: relevantProjects
+    }),
     "",
-    "다음 행동:",
-    "1. 원하는 결과물을 한 문장으로 확정합니다.",
-    "2. 관련 프로젝트나 사람을 연결합니다.",
-    "3. 실행이 필요한 작업은 위험도를 확인한 뒤 단계별로 진행합니다.",
     confirmation
   ]
     .filter(Boolean)
@@ -151,6 +160,8 @@ export function createLocalHeatherResponse(payload: ChatRequestPayload): ChatRes
     message: content,
     title: generateConversationTitle(payload.message),
     risk,
+    selectedTool: selectedTool.id,
+    appliedTeachingIds: relevantTeachings.map((teaching) => teaching.id),
     memorySuggestion: payload.settings.memoryEnabled
       ? {
           type: "important_fact",

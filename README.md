@@ -54,6 +54,7 @@ Cost-control defaults:
 - Voice controls with browser speech recognition/TTS where available.
 - Project memory seeded with the requested examples.
 - Personal memory CRUD with archive/delete controls.
+- Pinta-inspired learning architecture with teaching records and generative tool routing.
 - Project summary generation.
 - Person/organization analysis in the requested structure.
 - Daily briefing from current conversations, projects, and memories.
@@ -63,3 +64,9 @@ Cost-control defaults:
 ## Desktop Expansion
 
 Desktop-only operations are available through `PlatformAdapter` interfaces but are marked unavailable in the web adapter. Tauri/Electron can later implement local file access, app launch, clipboard, screen capture, and wake-word behavior without changing the core assistant logic.
+
+## Teaching Heather
+
+The `학습/생성` panel lets you teach Heather directives, preferences, examples, corrections, skills, and boundary rules. Those records are stored locally and applied to local-only responses, local-model responses, and cloud-provider prompts.
+
+See `docs/pinta-inspired-heather-learning.md` for the architecture note.

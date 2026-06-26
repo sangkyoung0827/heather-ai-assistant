@@ -1,5 +1,21 @@
 export type HeatherTone = "soft" | "analytical" | "direct";
 export type HeatherAIMode = "local_only" | "local_model" | "cloud_allowed";
+export type TeachingType =
+  | "directive"
+  | "preference"
+  | "example"
+  | "correction"
+  | "skill"
+  | "boundary_rule";
+
+export type GenerativeToolId =
+  | "conversation"
+  | "draft_writer"
+  | "project_planner"
+  | "relationship_analyst"
+  | "decision_comparator"
+  | "prompt_designer"
+  | "image_prompt";
 
 export type MemoryType =
   | "user_profile"
@@ -57,6 +73,36 @@ export interface MemoryRecord {
   created_at: string;
   updated_at: string;
   archived: boolean;
+}
+
+export interface TeachingRecord {
+  id: string;
+  type: TeachingType;
+  title: string;
+  content: string;
+  source: string;
+  confidence: number;
+  tags: string[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GenerativeTool {
+  id: GenerativeToolId;
+  name: string;
+  description: string;
+  keywords: string[];
+  outputContract: string[];
+}
+
+export interface GenerativeRun {
+  id: string;
+  toolId: GenerativeToolId;
+  input: string;
+  output: string;
+  teachingIds: string[];
+  created_at: string;
 }
 
 export interface HeatherSettings {
@@ -122,11 +168,14 @@ export interface ChatRequestPayload {
   settings: HeatherSettings;
   memories: MemoryRecord[];
   projects: ProjectRecord[];
+  teachings?: TeachingRecord[];
 }
 
 export interface ChatResponsePayload {
   message: string;
   title: string;
   risk: SafetyRisk;
+  selectedTool?: GenerativeToolId;
+  appliedTeachingIds?: string[];
   memorySuggestion?: Omit<MemoryRecord, "id" | "created_at" | "updated_at" | "archived">;
 }

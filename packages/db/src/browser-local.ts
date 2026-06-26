@@ -1,10 +1,21 @@
-import type { Conversation, HeatherSettings, MemoryRecord, ProjectRecord } from "@heather/core";
-import { createDefaultSettings, createSeedMemories, createSeedProjects } from "./seed";
+import type {
+  Conversation,
+  HeatherSettings,
+  MemoryRecord,
+  ProjectRecord,
+  TeachingRecord
+} from "@heather/core";
+import {
+  createDefaultSettings,
+  createSeedMemories,
+  createSeedProjects,
+  createSeedTeachings
+} from "./seed";
 import type { HeatherDatabase } from "./types";
 
 const STORAGE_PREFIX = "heather.ai";
 
-type CollectionName = "conversations" | "projects" | "memories";
+type CollectionName = "conversations" | "projects" | "memories" | "teachings";
 
 function storage(): Storage {
   if (typeof window === "undefined") {
@@ -123,10 +134,31 @@ export class BrowserHeatherDatabase implements HeatherDatabase {
     );
   }
 
+  async listTeachings(): Promise<TeachingRecord[]> {
+    const teachings = readCollection<TeachingRecord>("teachings", []);
+    if (teachings.length) return teachings;
+
+    const seeded = createSeedTeachings();
+    writeJson("teachings", seeded);
+    return seeded;
+  }
+
+  async saveTeaching(teaching: TeachingRecord): Promise<void> {
+    writeJson("teachings", upsert(await this.listTeachings(), teaching));
+  }
+
+  async deleteTeaching(id: string): Promise<void> {
+    writeJson(
+      "teachings",
+      (await this.listTeachings()).filter((teaching) => teaching.id !== id)
+    );
+  }
+
   async clearAll(): Promise<void> {
     storage().removeItem(key("settings"));
     storage().removeItem(key("conversations"));
     storage().removeItem(key("projects"));
     storage().removeItem(key("memories"));
+    storage().removeItem(key("teachings"));
   }
 }

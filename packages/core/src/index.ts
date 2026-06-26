@@ -1,6 +1,7 @@
 export * from "./analysis";
 export * from "./briefing";
 export * from "./conversation";
+export * from "./learning";
 export * from "./persona";
 export * from "./project-summary";
 export * from "./safety";

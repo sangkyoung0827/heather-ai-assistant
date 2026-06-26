@@ -1,4 +1,5 @@
 import {
+  buildTeachingContext,
   buildHeatherSystemPrompt,
   classifyActionRisk,
   generateConversationTitle
@@ -39,7 +40,9 @@ function buildContext(payload: ChatRequestPayload): string {
     memoryContext || "- 아직 연결된 기억이 없습니다.",
     "",
     "프로젝트:",
-    projectContext || "- 아직 프로젝트가 없습니다."
+    projectContext || "- 아직 프로젝트가 없습니다.",
+    "",
+    buildTeachingContext(payload.teachings)
   ].join("\n");
 }
 

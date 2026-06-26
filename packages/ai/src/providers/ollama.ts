@@ -1,4 +1,5 @@
 import {
+  buildTeachingContext,
   buildHeatherSystemPrompt,
   classifyActionRisk,
   generateConversationTitle
@@ -30,7 +31,9 @@ function compactContext(payload: ChatRequestPayload): string {
     memories || "- 없음",
     "",
     "프로젝트:",
-    projects || "- 없음"
+    projects || "- 없음",
+    "",
+    buildTeachingContext(payload.teachings)
   ].join("\n");
 }
 

@@ -1,4 +1,10 @@
-import type { Conversation, HeatherSettings, MemoryRecord, ProjectRecord } from "@heather/core";
+import type {
+  Conversation,
+  HeatherSettings,
+  MemoryRecord,
+  ProjectRecord,
+  TeachingRecord
+} from "@heather/core";
 
 export interface HeatherDatabase {
   getSettings(): Promise<HeatherSettings>;
@@ -12,6 +18,9 @@ export interface HeatherDatabase {
   listMemories(): Promise<MemoryRecord[]>;
   saveMemory(memory: MemoryRecord): Promise<void>;
   deleteMemory(id: string): Promise<void>;
+  listTeachings(): Promise<TeachingRecord[]>;
+  saveTeaching(teaching: TeachingRecord): Promise<void>;
+  deleteTeaching(id: string): Promise<void>;
   clearAll(): Promise<void>;
 }
 

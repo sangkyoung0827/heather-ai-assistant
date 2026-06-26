@@ -25,13 +25,15 @@ import type {
   Conversation,
   HeatherSettings,
   MemoryRecord,
-  ProjectRecord
+  ProjectRecord,
+  TeachingRecord
 } from "@heather/core";
 
 interface ChatPanelProps {
   conversations: Conversation[];
   memories: MemoryRecord[];
   projects: ProjectRecord[];
+  teachings: TeachingRecord[];
   settings: HeatherSettings;
   onSaveConversation: (conversation: Conversation) => Promise<void>;
   onDeleteConversation: (id: string) => Promise<void>;
@@ -79,6 +81,7 @@ export function ChatPanel({
   conversations,
   memories,
   projects,
+  teachings,
   settings,
   onSaveConversation,
   onDeleteConversation,
@@ -164,7 +167,8 @@ export function ChatPanel({
         conversation: optimisticConversation,
         settings,
         memories,
-        projects
+        projects,
+        teachings
       };
       const data = await resolveHeatherResponse(payload);
 
@@ -544,6 +548,10 @@ function cacheKey(payload: ChatRequestPayload): string {
     projects: payload.projects
       .slice(0, 6)
       .map((project) => [project.title, project.status, project.priority, project.next_actions.slice(0, 4)]),
+    teachings: (payload.teachings || [])
+      .filter((teaching) => teaching.active)
+      .slice(0, 6)
+      .map((teaching) => [teaching.type, teaching.title, teaching.content.slice(0, 180), teaching.tags]),
     history: payload.conversation?.messages
       .filter((message) => message.role !== "system")
       .slice(-4)
