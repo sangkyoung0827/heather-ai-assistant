@@ -3,6 +3,12 @@ import type {
   HeatherActionName,
   HeatherActionRiskLevel
 } from "./types";
+import {
+  buildServiceUrl,
+  inferCalendarRange,
+  parseCalendarEventDraft,
+  routeAccountProfile
+} from "./account-profiles";
 import { createId } from "./conversation";
 
 export const ALLOWED_HEATHER_ACTIONS: Array<{
@@ -22,6 +28,60 @@ export const ALLOWED_HEATHER_ACTIONS: Array<{
     description: "운영체제와 앱 버전 같은 안전한 시스템 정보를 확인합니다.",
     riskLevel: "low",
     requiresConfirmation: false
+  },
+  {
+    name: "connect_google_calendar",
+    description: "work 계정으로 Google Calendar OAuth 연결을 준비합니다. 비밀번호는 저장하지 않습니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
+    name: "calendar_read_events",
+    description: "work 계정의 Google Calendar 일정을 조회합니다.",
+    riskLevel: "low",
+    requiresConfirmation: true
+  },
+  {
+    name: "calendar_create_event",
+    description: "work 계정 Google Calendar에 일정 생성을 제안하고 확인 후 실행합니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
+    name: "calendar_update_event",
+    description: "work 계정 Google Calendar 일정을 수정합니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
+  },
+  {
+    name: "calendar_delete_event",
+    description: "work 계정 Google Calendar 일정을 삭제합니다. 명시 확인이 필요합니다.",
+    riskLevel: "high",
+    requiresConfirmation: true
+  },
+  {
+    name: "media_play",
+    description: "허용된 미디어 사이트에서 재생을 시도합니다.",
+    riskLevel: "low",
+    requiresConfirmation: true
+  },
+  {
+    name: "media_pause",
+    description: "허용된 미디어 사이트에서 일시정지를 시도합니다.",
+    riskLevel: "low",
+    requiresConfirmation: true
+  },
+  {
+    name: "media_next",
+    description: "허용된 미디어 사이트에서 다음 항목으로 이동을 시도합니다.",
+    riskLevel: "low",
+    requiresConfirmation: true
+  },
+  {
+    name: "media_previous",
+    description: "허용된 미디어 사이트에서 이전 항목으로 이동을 시도합니다.",
+    riskLevel: "low",
+    requiresConfirmation: true
   },
   {
     name: "open_url",
@@ -100,6 +160,18 @@ export const ALLOWED_HEATHER_ACTIONS: Array<{
     description: "허용 목록에 있는 앱만 실행합니다. Terminal은 열 수 있지만 command 실행은 금지합니다.",
     riskLevel: "high",
     requiresConfirmation: true
+  },
+  {
+    name: "focus_app",
+    description: "허용 목록에 있는 앱 창을 앞으로 가져옵니다.",
+    riskLevel: "low",
+    requiresConfirmation: true
+  },
+  {
+    name: "close_window",
+    description: "현재 창 닫기를 제안합니다. 항상 확인이 필요합니다.",
+    riskLevel: "medium",
+    requiresConfirmation: true
   }
 ];
 
@@ -149,6 +221,7 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
 
   const lower = input.toLowerCase();
   const actions: HeatherAction[] = [];
+  const accountRoute = routeAccountProfile(input);
 
   if (/ollama|올라마|로컬 ai|로컬 모델|model|모델/.test(lower)) {
     actions.push(createAction({ name: "check_ollama_status" }));
@@ -158,6 +231,65 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
     actions.push(createAction({ name: "get_system_info" }));
   }
 
+  if (/calendar|캘린더|일정|회의|미팅|스케줄/.test(lower)) {
+    if (/연결|connect|oauth/i.test(input)) {
+      actions.push(
+        createAction({
+          name: "connect_google_calendar",
+          args: {
+            accountProfileId: "work",
+            service: "google_calendar",
+            email: "waterfallingsound0827@gmail.com"
+          }
+        })
+      );
+    } else if (/삭제|지워|delete/i.test(input)) {
+      actions.push(
+        createAction({
+          name: "calendar_delete_event",
+          args: {
+            accountProfileId: "work",
+            service: "google_calendar",
+            range: inferCalendarRange(input)
+          }
+        })
+      );
+    } else if (/수정|변경|update/i.test(input)) {
+      actions.push(
+        createAction({
+          name: "calendar_update_event",
+          args: {
+            accountProfileId: "work",
+            service: "google_calendar",
+            draft: parseCalendarEventDraft(input)
+          }
+        })
+      );
+    } else if (/등록|추가|만들|create|add/i.test(input)) {
+      actions.push(
+        createAction({
+          name: "calendar_create_event",
+          args: {
+            accountProfileId: "work",
+            service: "google_calendar",
+            draft: parseCalendarEventDraft(input)
+          }
+        })
+      );
+    } else {
+      actions.push(
+        createAction({
+          name: "calendar_read_events",
+          args: {
+            accountProfileId: "work",
+            service: "google_calendar",
+            range: inferCalendarRange(input)
+          }
+        })
+      );
+    }
+  }
+
   const musicQuery = inferYouTubeMusicQuery(input);
   if (musicQuery) {
     actions.push(
@@ -165,7 +297,8 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
         name: "search_youtube_music",
         description: `YouTube Music에서 "${musicQuery}" 검색 페이지를 엽니다. 자동 재생은 하지 않습니다.`,
         args: {
-          intent: "music_search",
+          intent: /재생|틀어|play/i.test(input) ? "play_music" : "music_search",
+          accountProfileId: "media",
           service: "youtube_music",
           query: musicQuery,
           url: buildSearchUrl("youtube_music", musicQuery)
@@ -179,6 +312,7 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
         name: "search_youtube",
         args: {
           intent: "video_search",
+          accountProfileId: "media",
           service: "youtube",
           query,
           url: buildSearchUrl("youtube", query)
@@ -192,6 +326,7 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
         name: "search_web",
         args: {
           intent: "web_search",
+          accountProfileId: accountRoute.profileId,
           service: "web",
           query,
           url: buildSearchUrl("web", query)
@@ -235,7 +370,102 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
       createAction({
         name: "open_url",
         args: {
+          accountProfileId: accountRoute.profileId,
+          service: accountRoute.service,
           url: url || ""
+        }
+      })
+    );
+  }
+
+  if (/gmail|지메일/.test(lower)) {
+    actions.push(
+      createAction({
+        name: "open_url",
+        description: "work 계정용 Gmail URL을 엽니다. 올바른 브라우저 세션인지 사용자가 확인해야 합니다.",
+        args: {
+          accountProfileId: "work",
+          service: "gmail",
+          url: buildServiceUrl("gmail")
+        }
+      })
+    );
+  }
+
+  if (/netflix|넷플릭스/.test(lower)) {
+    actions.push(
+      createAction({
+        name: "open_url",
+        description: "media 계정용 Netflix URL을 엽니다. 올바른 브라우저 세션인지 사용자가 확인해야 합니다.",
+        args: {
+          accountProfileId: "media",
+          service: "netflix",
+          url: buildServiceUrl("netflix")
+        }
+      })
+    );
+  }
+
+  if (/유튜브\s*뮤직\s*열|youtube music.*open|open.*youtube music/i.test(input)) {
+    actions.push(
+      createAction({
+        name: "open_url",
+        args: {
+          accountProfileId: "media",
+          service: "youtube_music",
+          url: buildServiceUrl("youtube_music")
+        }
+      })
+    );
+  }
+
+  if (/음악\s*(꺼|중지)|일시정지|pause/i.test(input)) {
+    actions.push(
+      createAction({
+        name: "media_pause",
+        args: {
+          accountProfileId: "media",
+          service: "youtube_music",
+          driver: "youtube_music"
+        }
+      })
+    );
+  }
+
+  if (/다시\s*재생|재생해줘|play/i.test(input) && !musicQuery) {
+    actions.push(
+      createAction({
+        name: "media_play",
+        args: {
+          accountProfileId: "media",
+          service: "youtube_music",
+          driver: "youtube_music"
+        }
+      })
+    );
+  }
+
+  if (/다음\s*곡|next/i.test(input)) {
+    actions.push(
+      createAction({
+        name: "media_next",
+        args: {
+          accountProfileId: "media",
+          service: "youtube_music",
+          driver: "youtube_music"
+        }
+      })
+    );
+  }
+
+  if (/이전\s*곡|previous|prev/i.test(input)) {
+    actions.push(
+      createAction({
+        name: "media_previous",
+        args: {
+          accountProfileId: "media",
+          service: "youtube_music",
+          driver: "youtube_music"
         }
       })
     );
@@ -257,9 +487,21 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
   if (app) {
     actions.push(
       createAction({
-        name: "open_app",
+        name: /focus|앞으로|활성화|포커스/i.test(input) ? "focus_app" : "open_app",
         args: {
+          accountProfileId: accountRoute.profileId,
           appName: app
+        }
+      })
+    );
+  }
+
+  if (/창\s*닫|close window|window close/i.test(input)) {
+    actions.push(
+      createAction({
+        name: "close_window",
+        args: {
+          accountProfileId: accountRoute.profileId
         }
       })
     );
@@ -353,6 +595,7 @@ function inferAppName(input: string): string | null {
     [/notes|메모/i, "Notes"],
     [/calendar|캘린더/i, "Calendar"],
     [/music|음악/i, "Music"],
+    [/zoom|줌/i, "Zoom"],
     [/terminal|터미널/i, "Terminal"]
   ];
 

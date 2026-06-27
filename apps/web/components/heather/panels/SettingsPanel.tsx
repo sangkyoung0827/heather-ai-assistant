@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Cloud, Cpu, HardDrive, Mic, Monitor, ShieldCheck, Trash2, Volume2, WalletCards } from "lucide-react";
-import { PLATFORM_CAPABILITIES } from "@heather/core";
+import { ACCOUNT_PROFILES, PLATFORM_CAPABILITIES } from "@heather/core";
 import type { HeatherAIMode, HeatherSettings, HeatherTone } from "@heather/core";
 import { WebPlatformAdapter } from "@heather/platform";
 
@@ -247,6 +247,36 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
             <span className="text-sm text-slate-500">TTS: {voiceTestStatus}</span>
             <span className="text-sm text-slate-500">Mic: {micStatus}</span>
           </div>
+        </section>
+
+        <section className="space-y-3 border-b border-line pb-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-heather-700" />
+            <h4 className="font-semibold">Account Profiles</h4>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {ACCOUNT_PROFILES.map((profile) => (
+              <div key={profile.id} className="rounded-lg border border-line bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <strong>{profile.name}</strong>
+                  <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                    {profile.connectionStatus}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">{profile.email}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {profile.purpose} / {profile.services.join(", ")}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Browser profile: {profile.defaultBrowserProfile || "not configured"}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="rounded-lg border border-line bg-white p-3 text-sm leading-6 text-slate-600">
+            Heather는 Google 비밀번호, 쿠키, 토큰, API key를 저장하거나 GitHub에 커밋하지 않습니다.
+            Google Calendar/Gmail/Drive는 OAuth 연결이 준비된 뒤 work profile로만 사용합니다.
+          </p>
         </section>
 
         <section className="space-y-3 border-b border-line pb-4">

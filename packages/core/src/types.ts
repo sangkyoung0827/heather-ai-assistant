@@ -35,14 +35,36 @@ export type AutomationActionType =
 
 export type HeatherActionRiskLevel = "low" | "medium" | "high" | "critical";
 
+export type AccountProfileId = "work" | "media";
+
+export type AccountServiceId =
+  | "google_calendar"
+  | "gmail"
+  | "google_drive"
+  | "docs"
+  | "meetings"
+  | "youtube"
+  | "youtube_music"
+  | "netflix"
+  | "google_search";
+
 export type HeatherActionName =
   | "check_ollama_status"
   | "get_system_info"
+  | "connect_google_calendar"
+  | "calendar_read_events"
+  | "calendar_create_event"
+  | "calendar_update_event"
+  | "calendar_delete_event"
   | "open_url"
   | "open_external_url"
   | "search_web"
   | "search_youtube"
   | "search_youtube_music"
+  | "media_play"
+  | "media_pause"
+  | "media_next"
+  | "media_previous"
   | "choose_directory"
   | "list_directory"
   | "search_files"
@@ -50,7 +72,9 @@ export type HeatherActionName =
   | "get_clipboard_text"
   | "set_clipboard_text"
   | "capture_screen"
-  | "open_app";
+  | "open_app"
+  | "focus_app"
+  | "close_window";
 
 export type MemoryType =
   | "user_profile"
@@ -194,6 +218,23 @@ export interface HeatherAction {
   args: Record<string, unknown>;
 }
 
+export interface AccountProfile {
+  id: AccountProfileId;
+  name: string;
+  email: string;
+  purpose: "productivity" | "entertainment";
+  services: AccountServiceId[];
+  connectionStatus: "not_connected" | "browser_session" | "oauth_ready" | "connected";
+  defaultBrowserProfile?: string;
+}
+
+export interface CalendarEventDraft {
+  title: string;
+  dateLabel: string;
+  timeLabel?: string;
+  durationMinutes: number;
+}
+
 export interface ActionResult {
   success: boolean;
   actionName: HeatherActionName;
@@ -212,6 +253,8 @@ export interface ActionLogRecord {
   argsSummary: string;
   success: boolean;
   summaryForUser: string;
+  accountProfileId?: AccountProfileId;
+  service?: AccountServiceId;
 }
 
 export interface HeatherSettings {

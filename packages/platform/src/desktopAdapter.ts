@@ -24,6 +24,7 @@ export const DESKTOP_APP_ALLOWLIST = [
   "Notes",
   "Calendar",
   "Music",
+  "Zoom",
   "Terminal"
 ];
 

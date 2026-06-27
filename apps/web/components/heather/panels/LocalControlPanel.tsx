@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Clipboard,
@@ -9,6 +9,8 @@ import {
   HardDrive,
   Link,
   ListChecks,
+  Mic,
+  MicOff,
   Monitor,
   Play,
   RefreshCw,
@@ -20,12 +22,16 @@ import {
 } from "lucide-react";
 import {
   ALLOWED_HEATHER_ACTIONS,
+  ACCOUNT_PROFILES,
   createActionPlanFromRequest,
+  getAccountProfile,
   nowIso
 } from "@heather/core";
 import type {
   ActionLogRecord,
   ActionResult,
+  AccountProfileId,
+  AccountServiceId,
   HeatherAction,
   HeatherActionName,
   HeatherSettings
@@ -49,6 +55,24 @@ type OllamaStatus = {
   message: string;
 };
 
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start(): void;
+  stop(): void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+type WindowWithSpeechRecognition = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+};
+
 const DEFAULT_REQUEST = "헤더, Ollama 연결 상태 확인해줘.";
 const TEST_ACTIONS: Array<{
   label: string;
@@ -69,6 +93,26 @@ const TEST_ACTIONS: Array<{
     label: "Test YouTube Music",
     request: "헤더, 유튜브 뮤직에서 Living on a Prayer 재생해줘.",
     actionName: "search_youtube_music"
+  },
+  {
+    label: "Test Calendar Read",
+    request: "헤더, 오늘 일정 알려줘.",
+    actionName: "calendar_read_events"
+  },
+  {
+    label: "Test Calendar Create",
+    request: "헤더, 내일 오후 3시에 창업 미팅 일정 등록해줘.",
+    actionName: "calendar_create_event"
+  },
+  {
+    label: "Test Gmail",
+    request: "헤더, Gmail 열어줘.",
+    actionName: "open_url"
+  },
+  {
+    label: "Test Cursor",
+    request: "헤더, Cursor 열어줘.",
+    actionName: "open_app"
   },
   {
     label: "Test Pick Folder",
@@ -107,6 +151,9 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
   const [plannedActions, setPlannedActions] = useState<HeatherAction[]>([]);
   const [pendingAction, setPendingAction] = useState<HeatherAction | null>(null);
   const [actionLogs, setActionLogs] = useState<ActionLogRecord[]>([]);
+  const [calendarLogs, setCalendarLogs] = useState<ActionLogRecord[]>([]);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [clipboardEnabled, setClipboardEnabled] = useState(false);
   const [screenshotEnabled, setScreenshotEnabled] = useState(false);
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
@@ -122,6 +169,14 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         setActionLogs(JSON.parse(storedLogs) as ActionLogRecord[]);
       } catch {
         setActionLogs([]);
+      }
+    }
+    const storedCalendarLogs = window.localStorage.getItem("heather.local.calendarLogs");
+    if (storedCalendarLogs) {
+      try {
+        setCalendarLogs(JSON.parse(storedCalendarLogs) as ActionLogRecord[]);
+      } catch {
+        setCalendarLogs([]);
       }
     }
   }, []);
@@ -140,6 +195,11 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
     if (typeof window === "undefined") return;
     window.localStorage.setItem("heather.local.actionLogs", JSON.stringify(actionLogs.slice(0, 40)));
   }, [actionLogs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("heather.local.calendarLogs", JSON.stringify(calendarLogs.slice(0, 40)));
+  }, [calendarLogs]);
 
   async function updateSettings(partial: Partial<HeatherSettings>) {
     await onSaveSettings({
@@ -215,6 +275,47 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
     setNotice("");
   }
 
+  function toggleVoiceCommand() {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as WindowWithSpeechRecognition).SpeechRecognition ||
+      (window as WindowWithSpeechRecognition).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setNotice("이 환경은 음성 명령 입력을 지원하지 않습니다.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "ko-KR";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
+      if (!transcript) return;
+
+      setRequest(transcript);
+      setPlannedActions(createActionPlanFromRequest(transcript));
+      setNotice("음성 명령을 action proposal로 변환했습니다. 실행 전 확인 모달을 거칩니다.");
+    };
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      setNotice(event.error === "not-allowed" ? "마이크 권한이 거부되었습니다." : "음성 명령 입력 오류");
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setIsListening(false);
+    };
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
+  }
+
   async function runTestRequest(testRequest: string, actionName: HeatherActionName) {
     const actions = createActionPlanFromRequest(testRequest);
     const selectedAction = actions.find((action) => action.name === actionName) || actions[0];
@@ -260,6 +361,33 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
             ? `${info.osName} / Heather ${info.appVersion} / ${info.homeLabel}`
             : "Desktop bridge 연결이 필요합니다."
         };
+      }
+
+      if (action.name === "connect_google_calendar") {
+        const url = "https://calendar.google.com/calendar/u/0/r/settings";
+        await openSafeUrl(url);
+        return {
+          success: false,
+          actionName: action.name,
+          result: {
+            accountProfileId: "work",
+            service: "google_calendar",
+            url
+          },
+          summaryForUser:
+            "Google Calendar OAuth client is not configured yet. Work profile Calendar settings were opened; no password or token was stored."
+        };
+      }
+
+      if (
+        action.name === "calendar_read_events" ||
+        action.name === "calendar_create_event" ||
+        action.name === "calendar_update_event" ||
+        action.name === "calendar_delete_event"
+      ) {
+        const result = await executeCalendarAction(action);
+        appendCalendarLog(action, result);
+        return result;
       }
 
       if (action.name === "choose_directory") {
@@ -350,6 +478,25 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         };
       }
 
+      if (
+        action.name === "media_play" ||
+        action.name === "media_pause" ||
+        action.name === "media_next" ||
+        action.name === "media_previous"
+      ) {
+        return {
+          success: false,
+          actionName: action.name,
+          result: {
+            accountProfileId: "media",
+            service: action.args.service || "youtube_music",
+            driver: "youtube_music"
+          },
+          summaryForUser:
+            "YouTube Music media-key browser control is prepared, but automatic DOM playback control is still stabilizing. Open YouTube Music first and use the page controls."
+        };
+      }
+
       if (action.name === "get_clipboard_text") {
         if (!clipboardEnabled) throw new Error("Permission Center에서 클립보드 읽기를 켜야 합니다.");
         const text = await desktopAdapter!.getClipboardText!();
@@ -386,13 +533,25 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         };
       }
 
-      if (action.name === "open_app") {
+      if (action.name === "open_app" || action.name === "focus_app") {
         const appName = String(action.args.appName || "");
         await desktopAdapter!.openLocalApp!(appName);
         return {
           success: true,
           actionName: action.name,
-          summaryForUser: `${appName} 앱을 열었습니다.`
+          result: {
+            accountProfileId: action.args.accountProfileId,
+            appName
+          },
+          summaryForUser: action.name === "focus_app" ? `${appName} 앱을 앞으로 가져왔습니다.` : `${appName} 앱을 열었습니다.`
+        };
+      }
+
+      if (action.name === "close_window") {
+        return {
+          success: false,
+          actionName: action.name,
+          summaryForUser: "창 닫기 자동 실행은 아직 비활성화되어 있습니다. 사용자가 직접 닫아주세요."
         };
       }
 
@@ -410,6 +569,53 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         summaryForUser: error instanceof Error ? error.message : "작업 실행 중 오류가 발생했습니다."
       };
     }
+  }
+
+  async function executeCalendarAction(action: HeatherAction): Promise<ActionResult> {
+    const calendarUrl = "https://calendar.google.com/calendar/u/0/r";
+    await openSafeUrl(calendarUrl);
+
+    if (action.name === "calendar_read_events") {
+      return {
+        success: false,
+        actionName: action.name,
+        result: {
+          accountProfileId: "work",
+          service: "google_calendar",
+          range: action.args.range,
+          url: calendarUrl
+        },
+        summaryForUser:
+          "Work Google Calendar was opened. Google Calendar API OAuth is not connected yet, so Heather cannot read events directly."
+      };
+    }
+
+    if (action.name === "calendar_create_event") {
+      return {
+        success: false,
+        actionName: action.name,
+        result: {
+          accountProfileId: "work",
+          service: "google_calendar",
+          draft: action.args.draft,
+          url: calendarUrl
+        },
+        summaryForUser:
+          "Calendar event proposal is ready, but Google Calendar OAuth is not connected yet. No event was created and no token was stored."
+      };
+    }
+
+    return {
+      success: false,
+      actionName: action.name,
+      result: {
+        accountProfileId: "work",
+        service: "google_calendar",
+        url: calendarUrl
+      },
+      summaryForUser:
+        "Calendar update/delete requires Google Calendar OAuth and explicit confirmation. No calendar data was changed."
+    };
   }
 
   async function requireFolderId(): Promise<string> {
@@ -445,9 +651,28 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
       requiresConfirmation: action.requiresConfirmation,
       argsSummary: summarizeArgs(action),
       success: result.success,
-      summaryForUser: result.summaryForUser
+      summaryForUser: result.summaryForUser,
+      accountProfileId: normalizeProfileId(action.args.accountProfileId),
+      service: normalizeServiceId(action.args.service)
     };
     setActionLogs((current) => [log, ...current].slice(0, 40));
+  }
+
+  function appendCalendarLog(action: HeatherAction, result: ActionResult) {
+    const log: ActionLogRecord = {
+      id: `${Date.now()}-${action.name}`,
+      requestedAt: nowIso(),
+      userRequest: request.slice(0, 180),
+      actionName: action.name,
+      riskLevel: action.riskLevel,
+      requiresConfirmation: action.requiresConfirmation,
+      argsSummary: summarizeArgs(action),
+      success: result.success,
+      summaryForUser: result.summaryForUser,
+      accountProfileId: "work",
+      service: "google_calendar"
+    };
+    setCalendarLogs((current) => [log, ...current].slice(0, 40));
   }
 
   return (
@@ -536,6 +761,18 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
             >
               <Search className="h-4 w-4" />
               계획 생성
+            </button>
+            <button
+              type="button"
+              onClick={toggleVoiceCommand}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
+                isListening
+                  ? "border-coral bg-red-50 text-coral"
+                  : "border-line bg-white hover:bg-slate-50"
+              }`}
+            >
+              {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4 text-heather-700" />}
+              {isListening ? "음성 입력 중지" : "음성 명령"}
             </button>
             <button
               type="button"
@@ -665,6 +902,52 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
                 </span>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-line bg-white p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-heather-700" />
+            <h4 className="font-semibold">Account Profiles</h4>
+          </div>
+          <div className="space-y-2">
+            {ACCOUNT_PROFILES.map((profile) => (
+              <div key={profile.id} className="rounded-lg border border-line bg-slate-50 p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <strong>{profile.name}</strong>
+                  <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                    {profile.connectionStatus}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{profile.email}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-600">
+                  {profile.purpose} / {profile.services.join(", ")}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Browser profile: {profile.defaultBrowserProfile || "not configured"}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-line bg-white p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Clipboard className="h-4 w-4 text-heather-700" />
+            <h4 className="font-semibold">Calendar Log</h4>
+          </div>
+          <div className="max-h-48 space-y-2 overflow-y-auto heather-scrollbar">
+            {calendarLogs.length ? (
+              calendarLogs.map((log) => (
+                <div key={log.id} className="rounded-lg border border-line bg-slate-50 p-2 text-sm">
+                  <strong>{log.actionName}</strong>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">{log.summaryForUser}</p>
+                  <p className="mt-1 text-xs text-slate-400">{new Date(log.requestedAt).toLocaleString("ko-KR")}</p>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm leading-6 text-slate-600">아직 캘린더 실행 기록이 없습니다.</p>
+            )}
           </div>
         </section>
 
@@ -868,6 +1151,10 @@ function ConfirmRow({
 }
 
 function summarizeArgs(action: HeatherAction): string {
+  const profileId = normalizeProfileId(action.args.accountProfileId);
+  const profile = profileId ? getAccountProfile(profileId) : null;
+  const profileSummary = profile ? `${profile.id}/${profile.email} / ` : "";
+
   if (
     action.name === "open_url" ||
     action.name === "open_external_url" ||
@@ -876,9 +1163,14 @@ function summarizeArgs(action: HeatherAction): string {
     action.name === "search_youtube_music"
   ) {
     const query = action.args.query ? ` / query: ${String(action.args.query)}` : "";
-    return `${String(action.args.service || "url")}: ${String(action.args.url || "입력 요청에서 URL 추출")}${query}`;
+    return `${profileSummary}${String(action.args.service || "url")}: ${String(action.args.url || "입력 요청에서 URL 추출")}${query}`;
   }
-  if (action.name === "open_app") return String(action.args.appName || "앱 allowlist");
+  if (action.name.startsWith("calendar_") || action.name === "connect_google_calendar") {
+    return `${profileSummary}google_calendar / ${JSON.stringify(action.args.draft || action.args.range || "OAuth required")}`;
+  }
+  if (action.name.startsWith("media_")) return `${profileSummary}${String(action.args.service || "youtube_music")}`;
+  if (action.name === "open_app" || action.name === "focus_app") return String(action.args.appName || "앱 allowlist");
+  if (action.name === "close_window") return `${profileSummary}close window requires explicit confirmation`;
   if (action.name === "search_files") {
     const extensions = Array.isArray(action.args.extensions) ? action.args.extensions.join(", ") : "허용 확장자";
     return `선택 폴더 내부 / ${extensions}`;
@@ -905,4 +1197,23 @@ function resolveActionUrl(action: HeatherAction): string {
   }
 
   return "";
+}
+
+function normalizeProfileId(value: unknown): AccountProfileId | undefined {
+  return value === "work" || value === "media" ? value : undefined;
+}
+
+function normalizeServiceId(value: unknown): AccountServiceId | undefined {
+  const allowed: AccountServiceId[] = [
+    "google_calendar",
+    "gmail",
+    "google_drive",
+    "docs",
+    "meetings",
+    "youtube",
+    "youtube_music",
+    "netflix",
+    "google_search"
+  ];
+  return allowed.find((service) => service === value);
 }

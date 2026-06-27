@@ -35,6 +35,7 @@ const APP_ALLOWLIST: &[(&str, &str)] = &[
     ("Notes", "Notes"),
     ("Calendar", "Calendar"),
     ("Music", "Music"),
+    ("Zoom", "zoom.us"),
     ("Terminal", "Terminal"),
 ];
 
@@ -547,6 +548,7 @@ fn open_allowlisted_app(_label: &str, system_name: &str) -> Result<(), String> {
             "Notes" => "notepad",
             "Calendar" => "outlookcal:",
             "Music" => "mswindowsmusic:",
+            "zoom.us" => "Zoom",
             "Terminal" => "wt",
             _ => return Err("Unsupported allowlisted app on Windows.".to_string()),
         };
@@ -567,6 +569,7 @@ fn open_allowlisted_app(_label: &str, system_name: &str) -> Result<(), String> {
             "Notes" => return Err("Notes is not available on this platform.".to_string()),
             "Calendar" => return Err("Calendar is not available on this platform.".to_string()),
             "Music" => return Err("Music is not available on this platform.".to_string()),
+            "zoom.us" => ("zoom", None),
             "Terminal" => ("x-terminal-emulator", None),
             _ => return Err("Unsupported allowlisted app on Linux.".to_string()),
         };
