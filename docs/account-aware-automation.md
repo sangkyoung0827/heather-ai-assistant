@@ -15,6 +15,12 @@ Heather uses account profiles to route desktop and website actions without stori
 
 The MVP uses URL-based navigation first. Browser profile routing is represented in action metadata and UI, but if native browser profile selection is unavailable Heather asks the user to confirm the active browser account.
 
+Routing rule:
+
+- Calendar, Gmail, Drive, Docs, meetings, scheduling, and work/project tasks default to `work`.
+- YouTube, YouTube Music, Netflix, content consumption, music, and video tasks default to `media`.
+- Ambiguous tasks default to `work` until the user chooses otherwise.
+
 Allowed sites:
 
 - Google Search

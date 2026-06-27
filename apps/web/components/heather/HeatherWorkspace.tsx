@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   BrainCircuit,
+  Cpu,
   Database,
   FolderKanban,
   Home,
@@ -102,16 +104,19 @@ export function HeatherWorkspace() {
   const availableCapabilities = PLATFORM_CAPABILITIES.filter(
     (capability) => capability.status === "available"
   ).length;
+  const activeLabel = NAVIGATION.find((item) => item.id === activeView)?.label || "브리핑";
 
   return (
-    <main className="min-h-screen bg-mist text-ink">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1540px] flex-col gap-4 p-3 lg:flex-row lg:p-4">
-        <aside className="flex shrink-0 flex-col gap-3 border-line bg-white p-3 shadow-soft lg:h-[calc(100vh-2rem)] lg:w-72 lg:border lg:rounded-lg">
-          <div className="flex items-center gap-3 border-b border-line pb-3">
-            <Image src="/icons/heather-icon.svg" alt="" width={44} height={44} className="rounded-lg" />
+    <main className="heather-hud min-h-screen overflow-hidden bg-[#01060d] text-cyan-50">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1740px] flex-col gap-4 p-3 lg:flex-row lg:p-4">
+        <aside className="hud-sidebar flex shrink-0 flex-col gap-4 p-4 lg:h-[calc(100vh-2rem)] lg:w-[300px]">
+          <div className="hud-profile flex items-center gap-3 pb-4">
+            <div className="hud-avatar-shell">
+              <Image src="/icons/heather-icon.svg" alt="" width={86} height={86} className="hud-avatar-img" />
+            </div>
             <div>
-              <p className="text-sm font-semibold text-heather-700">Heather AI Assistant</p>
-              <h1 className="text-xl font-semibold">헤더</h1>
+              <p className="text-sm font-semibold text-cyan-200">Heather AI Assistant</p>
+              <h1 className="text-2xl font-semibold tracking-normal text-white">헤더</h1>
             </div>
           </div>
 
@@ -124,10 +129,10 @@ export function HeatherWorkspace() {
                   key={item.id}
                   type="button"
                   onClick={() => setActiveView(item.id)}
-                  className={`flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition lg:justify-start ${
+                  className={`hud-nav-item flex min-h-12 items-center justify-center gap-3 px-3 text-sm font-medium transition lg:justify-start ${
                     selected
-                      ? "border-heather-500 bg-heather-50 text-heather-900"
-                      : "border-transparent bg-white text-slate-600 hover:border-line hover:bg-slate-50"
+                      ? "hud-nav-item-active text-white"
+                      : "text-cyan-100/70 hover:text-white"
                   }`}
                   title={item.label}
                 >
@@ -138,37 +143,43 @@ export function HeatherWorkspace() {
             })}
           </nav>
 
-          <div className="mt-auto hidden space-y-2 border-t border-line pt-3 text-sm text-slate-600 lg:block">
+          <div className="hud-mini-panel mt-auto hidden space-y-3 p-4 text-sm text-cyan-100/75 lg:block">
             <div className="flex items-center justify-between">
               <span>진행 프로젝트</span>
-              <strong className="text-ink">{activeProjectCount}</strong>
+              <strong className="text-white">{activeProjectCount}</strong>
             </div>
             <div className="flex items-center justify-between">
               <span>저장 기억</span>
-              <strong className="text-ink">{data.memories.filter((memory) => !memory.archived).length}</strong>
+              <strong className="text-white">{data.memories.filter((memory) => !memory.archived).length}</strong>
             </div>
             <div className="flex items-center justify-between">
               <span>교육 기록</span>
-              <strong className="text-ink">{data.teachings.filter((teaching) => teaching.active).length}</strong>
+              <strong className="text-white">{data.teachings.filter((teaching) => teaching.active).length}</strong>
             </div>
             <div className="flex items-center justify-between">
               <span>자동화 루틴</span>
-              <strong className="text-ink">{data.automationRecipes.filter((recipe) => recipe.enabled).length}</strong>
+              <strong className="text-white">{data.automationRecipes.filter((recipe) => recipe.enabled).length}</strong>
             </div>
             <div className="flex items-center justify-between">
               <span>웹 기능</span>
-              <strong className="text-ink">{availableCapabilities}</strong>
+              <strong className="text-white">{availableCapabilities}</strong>
+            </div>
+          </div>
+
+          <div className="hud-system-status hidden p-4 lg:block">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/70">System Status</p>
+            <p className="mt-2 text-sm font-semibold text-cyan-200">ONLINE</p>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-950">
+              <div className="h-full w-[86%] bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.95)]" />
             </div>
           </div>
         </aside>
 
-        <section className="flex min-w-0 flex-1 flex-col border-line bg-white shadow-soft lg:h-[calc(100vh-2rem)] lg:overflow-hidden lg:border lg:rounded-lg">
-          <header className="flex flex-col gap-3 border-b border-line p-4 md:flex-row md:items-center md:justify-between">
+        <section className="hud-main-panel flex min-w-0 flex-1 flex-col lg:h-[calc(100vh-2rem)] lg:overflow-hidden">
+          <header className="hud-topbar flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-sm font-medium text-heather-700">오늘은 무엇을 도와주면 좋을까?</p>
-              <h2 className="text-2xl font-semibold">
-                {NAVIGATION.find((item) => item.id === activeView)?.label}
-              </h2>
+              <p className="text-sm font-semibold text-cyan-200">오늘은 무엇을 도와주면 좋을까?</p>
+              <h2 className="mt-1 text-3xl font-semibold text-white">{activeLabel}</h2>
             </div>
             <div className="grid grid-cols-3 gap-2 text-sm">
               <StatusPill icon={BrainCircuit} label={data.settings.tone} value="말투" />
@@ -177,9 +188,9 @@ export function HeatherWorkspace() {
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 heather-scrollbar">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 heather-scrollbar md:p-5">
             {!data.ready ? (
-              <div className="flex min-h-[360px] items-center justify-center text-sm text-slate-500">
+              <div className="flex min-h-[360px] items-center justify-center text-sm text-cyan-100/70">
                 Heather 작업공간을 불러오는 중입니다.
               </div>
             ) : (
@@ -256,6 +267,37 @@ export function HeatherWorkspace() {
             )}
           </div>
         </section>
+
+        <aside className="hud-right-rail hidden shrink-0 flex-col gap-5 p-4 2xl:flex 2xl:h-[calc(100vh-2rem)] 2xl:w-[178px]">
+          <div className="hud-clock">
+            <p className="font-mono text-lg text-cyan-100">19:40:21</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-300/70">Local Core</p>
+          </div>
+
+          <div className="hud-core-orb" aria-hidden="true" />
+
+          <div>
+            <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/60">AI Core</p>
+            <p className="mt-1 text-sm font-semibold text-cyan-300">ACTIVE</p>
+            <div className="hud-equalizer mt-3" aria-hidden="true">
+              {Array.from({ length: 26 }).map((_, index) => (
+                <span key={index} />
+              ))}
+            </div>
+          </div>
+
+          <div className="hud-rail-metric">
+            <Activity className="h-4 w-4 text-cyan-300" />
+            <p className="mt-2 text-xs uppercase tracking-[0.14em] text-cyan-200/60">Neural Network</p>
+            <p className="mt-1 font-mono text-2xl text-cyan-100">98.7%</p>
+          </div>
+
+          <div className="hud-rail-metric mt-auto">
+            <Cpu className="h-4 w-4 text-cyan-300" />
+            <p className="mt-2 text-xs uppercase tracking-[0.14em] text-cyan-200/60">Bridge</p>
+            <p className="mt-1 text-sm font-semibold text-cyan-100">TAURI READY</p>
+          </div>
+        </aside>
       </div>
     </main>
   );
@@ -271,10 +313,10 @@ function StatusPill({
   value: string;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-lg border border-line bg-slate-50 px-3 py-2">
-      <Icon className="h-4 w-4 shrink-0 text-heather-700" />
-      <span className="hidden text-slate-500 sm:inline">{value}</span>
-      <strong className="truncate text-ink">{label}</strong>
+    <div className="hud-status-chip flex min-w-0 items-center gap-3 px-3 py-2">
+      <Icon className="h-4 w-4 shrink-0 text-cyan-300" />
+      <span className="hidden text-cyan-100/55 sm:inline">{value}</span>
+      <strong className="truncate text-white">{label}</strong>
     </div>
   );
 }

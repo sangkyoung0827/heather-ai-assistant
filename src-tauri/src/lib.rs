@@ -11,7 +11,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
@@ -278,6 +278,11 @@ fn set_clipboard_text(text: String) -> Result<(), String> {
     write_clipboard_text(&text)
 }
 
+#[tauri::command]
+fn show_heather(app: AppHandle) {
+    show_main_window(&app);
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(DesktopState::default())
@@ -298,6 +303,7 @@ pub fn run() {
         )
         .setup(|app| {
             setup_tray(app.handle())?;
+            setup_floating_launcher(app.handle())?;
             register_global_shortcuts(app.handle())?;
             Ok(())
         })
@@ -316,10 +322,26 @@ pub fn run() {
             open_external_url,
             open_app,
             get_clipboard_text,
-            set_clipboard_text
+            set_clipboard_text,
+            show_heather
         ])
         .run(tauri::generate_context!())
         .expect("error while running Heather AI Assistant");
+}
+
+fn setup_floating_launcher(app: &AppHandle) -> tauri::Result<()> {
+    WebviewWindowBuilder::new(app, "floating", WebviewUrl::App("floating".into()))
+        .title("Heather")
+        .inner_size(92.0, 92.0)
+        .min_inner_size(76.0, 76.0)
+        .position(24.0, 128.0)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .transparent(true)
+        .build()?;
+    Ok(())
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {

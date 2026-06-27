@@ -27,6 +27,7 @@ export interface AIProvider {
   chat(messages: ChatMessage[], options?: ChatOptions): Promise<ProviderChatResponse>;
   streamChat?(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<ChatChunk>;
   generate?(messages: ChatMessage[], options?: ChatOptions): Promise<ProviderChatResponse>;
+  listModels?(): Promise<string[]>;
   isAvailable(): Promise<boolean>;
   generateChat(payload: ChatRequestPayload): Promise<ChatResponsePayload>;
 }

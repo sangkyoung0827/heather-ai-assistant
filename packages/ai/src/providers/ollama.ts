@@ -29,6 +29,15 @@ interface OllamaGenerateResponse {
   error?: string;
 }
 
+interface OllamaTagsResponse {
+  models?: Array<{
+    name?: string;
+    model?: string;
+  }>;
+}
+
+const DEFAULT_MODEL = "llama3.2:latest";
+
 function compactContext(payload: ChatRequestPayload): string {
   const memories = payload.memories
     .filter((memory) => !memory.archived)
@@ -63,7 +72,7 @@ function compactContext(payload: ChatRequestPayload): string {
 
 export function createOllamaProvider(config: AIProviderConfig): AIProvider {
   const baseUrl = (config.baseUrl || "http://localhost:11434").replace(/\/$/, "");
-  const defaultModel = config.model || "gemma4:latest";
+  const defaultModel = config.model || DEFAULT_MODEL;
 
   function mapOllamaError(message: string, status?: number): string {
     const normalized = message.toLowerCase();
@@ -72,17 +81,54 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
       normalized.includes("not found") ||
       normalized.includes("model") && normalized.includes("pull")
     ) {
-      return `Configured Ollama model is not installed. Pull it with: ollama pull ${defaultModel}`;
+      return `Ollama 모델을 찾지 못했어요. 먼저 \`ollama pull ${DEFAULT_MODEL.replace(":latest", "")}\` 실행 후 다시 시도하세요.`;
     }
 
-    return "Ollama is not running. Start it with: ollama serve";
+    return "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요.";
+  }
+
+  async function listModels(): Promise<string[]> {
+    let response: Response;
+
+    try {
+      response = await fetch(`${baseUrl}/api/tags`);
+    } catch (error) {
+      throw new Error(mapOllamaError(error instanceof Error ? error.message : ""));
+    }
+
+    if (!response.ok) {
+      throw new Error(mapOllamaError("", response.status));
+    }
+
+    const data = (await response.json()) as OllamaTagsResponse;
+    return (data.models || [])
+      .map((model) => model.name || model.model || "")
+      .filter(Boolean);
+  }
+
+  async function resolveModel(requestedModel: string): Promise<string> {
+    const models = await listModels();
+    if (!models.length) {
+      throw new Error(
+        `Ollama에 설치된 모델이 없습니다. 먼저 \`ollama pull ${DEFAULT_MODEL.replace(":latest", "")}\` 실행 후 다시 시도하세요.`
+      );
+    }
+
+    const exact = models.find((model) => model === requestedModel);
+    if (exact) return exact;
+
+    const requestedBase = requestedModel.replace(/:latest$/, "");
+    const baseMatch = models.find((model) => model.replace(/:latest$/, "") === requestedBase);
+    if (baseMatch) return baseMatch;
+
+    return models[0];
   }
 
   async function chat(
     messages: ChatMessage[],
     options: ChatOptions = {}
   ): Promise<ProviderChatResponse> {
-    const model = options.model || defaultModel;
+    const model = await resolveModel(options.model || defaultModel);
     let response: Response;
 
     try {
@@ -127,6 +173,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
   return {
     id: "ollama",
     chat,
+    listModels,
     async isAvailable(): Promise<boolean> {
       try {
         const response = await fetch(`${baseUrl}/api/tags`);
@@ -176,7 +223,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
       };
     },
     async *streamChat(messages: ChatMessage[], options: ChatOptions = {}) {
-      const model = options.model || defaultModel;
+      const model = await resolveModel(options.model || defaultModel);
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: {
@@ -221,6 +268,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     },
     async generate(messages: ChatMessage[], options: ChatOptions = {}) {
       const model = options.model || defaultModel;
+      const resolvedModel = await resolveModel(model);
       const prompt = messages.map((message) => `${message.role}: ${message.content}`).join("\n");
       const response = await fetch(`${baseUrl}/api/generate`, {
         method: "POST",
@@ -228,7 +276,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model,
+          model: resolvedModel,
           prompt,
           stream: false,
           options: {
@@ -245,7 +293,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
 
       return {
         content: data.response?.trim() || "",
-        model: data.model || model,
+        model: data.model || resolvedModel,
         raw: data
       };
     }

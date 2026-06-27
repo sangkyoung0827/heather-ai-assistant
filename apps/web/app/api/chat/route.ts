@@ -26,7 +26,7 @@ const paidApiCounters = globalThis.heatherPaidApiCounters ?? new Map<string, num
 globalThis.heatherPaidApiCounters = paidApiCounters;
 
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
-const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
+const DEFAULT_OLLAMA_MODEL = "llama3.2:latest";
 
 export async function POST(request: Request) {
   try {
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
               error:
                 error instanceof Error
                   ? error.message
-                  : "Ollama is not running. Start it with: ollama serve"
+                  : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요."
             },
             { status: 503 }
           );
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     if (payload.settings.aiMode === "local_model") {
       return NextResponse.json(
         {
-          error: "Ollama is not running. Start it with: ollama serve"
+          error: "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요."
         },
         { status: 503 }
       );

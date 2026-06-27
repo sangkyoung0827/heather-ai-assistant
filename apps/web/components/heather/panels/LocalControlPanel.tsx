@@ -51,7 +51,9 @@ interface LocalControlPanelProps {
 type OllamaStatus = {
   available: boolean;
   baseUrl: string;
+  configuredModel?: string;
   model: string;
+  models?: string[];
   message: string;
 };
 
@@ -229,7 +231,7 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         available: false,
         baseUrl: settings.ollamaBaseUrl,
         model: settings.ollamaModel,
-        message: "Ollama is not running. Start it with: ollama serve"
+        message: "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요."
       };
       setOllamaStatus(data);
       return data;
@@ -708,6 +710,16 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
               />
             </label>
           </div>
+          {ollamaStatus ? (
+            <div className="mt-3 rounded-lg border border-line bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              <span className="font-semibold text-ink">{ollamaStatus.message}</span>
+              {ollamaStatus.models?.length ? (
+                <span className="mt-1 block">
+                  설치 모델: {ollamaStatus.models.slice(0, 4).join(", ")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
             <button
