@@ -12,9 +12,9 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: "portrait-primary",
     icons: [
       {
-        src: "/icons/heather-icon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: "/icons/heather-icon.png",
+        sizes: "512x512",
+        type: "image/png",
         purpose: "maskable"
       }
     ]

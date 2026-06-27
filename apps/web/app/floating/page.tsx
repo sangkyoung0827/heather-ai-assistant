@@ -31,7 +31,7 @@ export default function FloatingLauncherPage() {
         title="Heather AI Assistant"
         data-tauri-drag-region
       >
-        <Image src="/icons/heather-icon.svg" alt="" width={58} height={58} priority />
+        <Image src="/icons/heather-icon.png" alt="" width={58} height={58} priority />
       </button>
     </main>
   );

@@ -172,7 +172,7 @@ export function ChatPanel({
     setIsSending(true);
     setProviderStatus("헤더가 맥락을 확인하는 중");
 
-    const baseConversation = activeConversation || createConversation(message);
+    const baseConversation = activeConversation || createConversation();
     const userMessage = createMessage("user", message, inputSource);
     const optimisticConversation: Conversation = {
       ...baseConversation,
