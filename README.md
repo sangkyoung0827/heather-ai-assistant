@@ -38,7 +38,7 @@ For no-credit local model responses, run an Ollama-compatible server and set:
 
 ```bash
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=llama3.1
+OLLAMA_MODEL=gemma4:latest
 ```
 
 Cost-control defaults:

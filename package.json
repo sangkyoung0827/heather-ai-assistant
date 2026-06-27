@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "npm run dev -w @heather/web",
     "build": "npm run build -w @heather/web",
+    "build:tauri-web": "npm run build && node scripts/build-tauri-web.mjs",
     "lint": "npm run lint -w @heather/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "tauri:dev": "npx tauri dev",
@@ -17,7 +18,7 @@
     "tauri:info": "npx tauri info"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.3"

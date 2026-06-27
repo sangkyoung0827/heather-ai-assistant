@@ -75,10 +75,9 @@ export class BrowserHeatherDatabase implements HeatherDatabase {
       hasStoredSettings &&
       merged.aiMode === "local_only" &&
       (!stored.ollamaBaseUrl || stored.ollamaBaseUrl === "http://127.0.0.1:11434") &&
-      (!stored.ollamaModel || stored.ollamaModel === "llama3.1");
-    const isLegacyOllamaModel = hasStoredSettings && stored.ollamaModel === "gemma4:latest";
+      (!stored.ollamaModel || stored.ollamaModel !== defaults.ollamaModel);
 
-    if (isLegacyLocalOnlyDefault || isLegacyOllamaModel) {
+    if (isLegacyLocalOnlyDefault) {
       merged.aiMode = "local_model";
       merged.ollamaBaseUrl = defaults.ollamaBaseUrl;
       merged.ollamaModel = defaults.ollamaModel;

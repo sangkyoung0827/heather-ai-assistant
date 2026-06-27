@@ -39,6 +39,7 @@ import type {
 import {
   DESKTOP_APP_ALLOWLIST,
   TauriDesktopPlatformAdapter,
+  invokeTauriCommand,
   isTauriRuntime
 } from "@heather/platform";
 import type { AllowedDirectory, FileItem, SystemInfo } from "@heather/platform";
@@ -213,17 +214,12 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
   async function checkOllamaStatus() {
     setNotice("");
     try {
-      const response = await fetch("/api/ollama/status", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          baseUrl: settings.ollamaBaseUrl,
-          model: settings.ollamaModel
-        })
-      });
-      const data = (await response.json()) as OllamaStatus;
+      const data = desktopAdapter
+        ? await invokeTauriCommand<OllamaStatus>("ollama_status", {
+            baseUrl: settings.ollamaBaseUrl,
+            model: settings.ollamaModel
+          })
+        : await requestOllamaStatus(settings.ollamaBaseUrl, settings.ollamaModel);
       setOllamaStatus(data);
       return data;
     } catch {
@@ -236,6 +232,20 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
       setOllamaStatus(data);
       return data;
     }
+  }
+
+  async function requestOllamaStatus(baseUrl: string, model: string): Promise<OllamaStatus> {
+    const response = await fetch("/api/ollama/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        baseUrl,
+        model
+      })
+    });
+    return (await response.json()) as OllamaStatus;
   }
 
   async function checkBridgeStatus() {

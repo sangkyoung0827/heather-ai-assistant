@@ -12,7 +12,7 @@ export function createDefaultSettings(): HeatherSettings {
     tone: "analytical",
     aiMode: "local_model",
     ollamaBaseUrl: "http://localhost:11434",
-    ollamaModel: "llama3.2:latest",
+    ollamaModel: "gemma4:latest",
     allowPaidApiCalls: false,
     monthlyApiCallLimit: 0,
     apiCallsThisMonth: 0,

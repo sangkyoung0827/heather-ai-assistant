@@ -26,7 +26,7 @@ const paidApiCounters = globalThis.heatherPaidApiCounters ?? new Map<string, num
 globalThis.heatherPaidApiCounters = paidApiCounters;
 
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
-const DEFAULT_OLLAMA_MODEL = "llama3.2:latest";
+const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
 
 export async function POST(request: Request) {
   try {
@@ -38,8 +38,9 @@ export async function POST(request: Request) {
 
     const localProvider = createLocalAIProvider();
     const cacheKey = createCacheKey(payload);
+    const providerModelStatusQuestion = asksCurrentProviderOrModel(payload.message);
 
-    if (payload.settings.cacheResponses) {
+    if (payload.settings.cacheResponses && !providerModelStatusQuestion) {
       const cached = chatCache.get(cacheKey);
       if (cached) {
         return NextResponse.json({
@@ -74,7 +75,8 @@ export async function POST(request: Request) {
         const response = await provider.generateChat(payload);
         return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
           ...response,
-          provider: "ollama"
+          provider: "ollama",
+          model: response.model || ollamaModel
         }));
       } catch (error) {
         if (payload.settings.aiMode === "local_model" || payload.settings.aiMode === "cloud_allowed") {
@@ -166,11 +168,22 @@ function cacheIfNeeded(
   payload: ChatRequestPayload,
   response: CachedChatResponse
 ): CachedChatResponse {
-  if (payload.settings.cacheResponses) {
+  if (payload.settings.cacheResponses && !asksCurrentProviderOrModel(payload.message)) {
     chatCache.set(cacheKey, response);
   }
 
   return response;
+}
+
+function asksCurrentProviderOrModel(message: string): boolean {
+  const normalized = message.toLowerCase();
+  const asksRuntime =
+    /모델|model|provider|프로바이더|제공자|엔진|backend|백엔드|api|런타임|runtime|상태|status|로컬\s*모델/.test(
+      normalized
+    );
+  const asksCurrent = /현재|지금|사용\s*중|쓰고|뭐야|무엇|알려|확인|check|current/.test(normalized);
+
+  return asksCurrent && asksRuntime;
 }
 
 function createCacheKey(payload: ChatRequestPayload): string {

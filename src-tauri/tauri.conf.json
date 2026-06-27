@@ -6,8 +6,8 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../apps/web/.next"
+    "beforeBuildCommand": "npm run build:tauri-web",
+    "frontendDist": "../apps/web/out-tauri"
   },
   "app": {
     "withGlobalTauri": true,
@@ -28,6 +28,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": ["app"]
   }
 }

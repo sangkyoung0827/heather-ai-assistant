@@ -96,6 +96,8 @@ export interface ConversationMessage {
   content: string;
   createdAt: string;
   source?: "text" | "voice";
+  provider?: string;
+  model?: string;
 }
 
 export interface Conversation {
@@ -331,6 +333,8 @@ export interface ChatResponsePayload {
   message: string;
   title: string;
   risk: SafetyRisk;
+  provider?: string;
+  model?: string;
   selectedTool?: GenerativeToolId;
   appliedTeachingIds?: string[];
   memorySuggestion?: Omit<MemoryRecord, "id" | "created_at" | "updated_at" | "archived">;

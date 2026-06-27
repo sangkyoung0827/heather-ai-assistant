@@ -102,13 +102,13 @@ Ollama를 사용하려면 별도 터미널에서 다음처럼 실행한다.
 
 ```bash
 ollama serve
-ollama pull llama3.2
+ollama pull gemma4
 ```
 
 앱 설정 또는 환경변수로 모델을 바꿀 수 있다.
 
 ```bash
-OLLAMA_MODEL=llama3.2:latest
+OLLAMA_MODEL=gemma4:latest
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 

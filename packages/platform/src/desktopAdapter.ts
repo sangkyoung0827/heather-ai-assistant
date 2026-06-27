@@ -32,6 +32,18 @@ export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && Boolean((window as TauriWindow).__TAURI__?.core?.invoke);
 }
 
+export async function invokeTauriCommand<T = unknown>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  const invoke = (window as TauriWindow).__TAURI__?.core?.invoke;
+  if (!invoke) {
+    throw new Error("Tauri Desktop bridge가 연결되어 있지 않습니다.");
+  }
+
+  return invoke<T>(command, args);
+}
+
 export class TauriDesktopPlatformAdapter implements PlatformAdapter {
   getPlatformName(): "desktop" {
     return "desktop";
@@ -142,10 +154,5 @@ async function invokeTauri<T = unknown>(
   command: string,
   args?: Record<string, unknown>
 ): Promise<T> {
-  const invoke = (window as TauriWindow).__TAURI__?.core?.invoke;
-  if (!invoke) {
-    throw new Error("Tauri Desktop bridge가 연결되어 있지 않습니다.");
-  }
-
-  return invoke<T>(command, args);
+  return invokeTauriCommand<T>(command, args);
 }

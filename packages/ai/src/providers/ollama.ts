@@ -36,7 +36,7 @@ interface OllamaTagsResponse {
   }>;
 }
 
-const DEFAULT_MODEL = "llama3.2:latest";
+const DEFAULT_MODEL = "gemma4:latest";
 
 function compactContext(payload: ChatRequestPayload): string {
   const memories = payload.memories
@@ -121,7 +121,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     const baseMatch = models.find((model) => model.replace(/:latest$/, "") === requestedBase);
     if (baseMatch) return baseMatch;
 
-    return models[0];
+    throw new Error(mapOllamaError(`model ${requestedModel} not found`, 404));
   }
 
   async function chat(
@@ -129,6 +129,14 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     options: ChatOptions = {}
   ): Promise<ProviderChatResponse> {
     const model = await resolveModel(options.model || defaultModel);
+    return sendChat(messages, model, options);
+  }
+
+  async function sendChat(
+    messages: ChatMessage[],
+    model: string,
+    options: ChatOptions = {}
+  ): Promise<ProviderChatResponse> {
     let response: Response;
 
     try {
@@ -144,7 +152,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 320
+            num_predict: options.maxTokens || 1200
           }
         })
       });
@@ -168,6 +176,17 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
       model: data.model || model,
       raw: data
     };
+  }
+
+  function asksCurrentProviderOrModel(message: string): boolean {
+    const normalized = message.toLowerCase();
+    const asksRuntime =
+      /모델|model|provider|프로바이더|제공자|엔진|backend|백엔드|api|런타임|runtime|상태|status|로컬\s*모델/.test(
+        normalized
+      );
+    const asksCurrent = /현재|지금|사용\s*중|쓰고|뭐야|무엇|알려|확인|check|current/.test(normalized);
+
+    return asksCurrent && asksRuntime;
   }
 
   return {
@@ -195,13 +214,29 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           content: message.content.slice(0, 700)
         }));
 
-      const response = await chat(
+      const model = await resolveModel(payload.settings.ollamaModel || defaultModel);
+      const executionContext = `현재 실행 환경: provider=ollama, model=${model}. 사용자가 현재 모델명이나 provider를 물으면 이 값을 직접 답한다.`;
+
+      if (asksCurrentProviderOrModel(payload.message)) {
+        return {
+          message: `현재 사용 중인 모델은 ${model}입니다. provider는 ollama입니다.`,
+          title: generateConversationTitle(payload.message),
+          risk: classifyActionRisk(payload.message),
+          provider: "ollama",
+          model
+        };
+      }
+
+      const response = await sendChat(
         [
           {
             role: "system",
             content: [
               buildHeatherSystemPrompt(payload.settings),
-              "현재 Heather는 Ollama provider를 통해 로컬 모델로 답변 중이다.",
+              executionContext,
+              "하드 응답 규칙: 사용자가 현재 모델, provider, backend, API 상태, 로컬 모델, 런타임 상태를 물으면 provider와 model 값을 직접 짧게 답한다.",
+              "단순 사실 질문은 1-3문장으로 답한다. 분석 질문일 때만 구조화된 상세 답변을 사용한다.",
+              "사용자가 명시적으로 요청하지 않는 한 심리 분석, 감정 추정, 투명성 논의로 확장하지 않는다.",
               "응답은 사용자의 질문에 직접 답하고, 불필요한 내부 사고 과정을 쓰지 않는다."
             ].join("\n")
           },
@@ -209,17 +244,19 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           ...(history || []),
           { role: "user", content: payload.message }
         ],
+        model,
         {
-          model: payload.settings.ollamaModel || defaultModel,
           temperature: 0.6,
-          maxTokens: 320
+          maxTokens: 1200
         }
       );
 
       return {
         message: response.content,
         title: generateConversationTitle(payload.message),
-        risk: classifyActionRisk(payload.message)
+        risk: classifyActionRisk(payload.message),
+        provider: "ollama",
+        model: response.model || model
       };
     },
     async *streamChat(messages: ChatMessage[], options: ChatOptions = {}) {
@@ -236,7 +273,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 320
+            num_predict: options.maxTokens || 1200
           }
         })
       });
@@ -281,7 +318,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           stream: false,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 320
+            num_predict: options.maxTokens || 1200
           }
         })
       });

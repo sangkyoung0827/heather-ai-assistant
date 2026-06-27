@@ -30,6 +30,7 @@ import type {
   ProjectRecord,
   TeachingRecord
 } from "@heather/core";
+import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -46,6 +47,7 @@ interface ChatPanelProps {
 
 interface ApiChatResponse extends ChatResponsePayload {
   provider?: string;
+  model?: string;
   providerWarning?: string;
   cached?: boolean;
   meteredApiCall?: boolean;
@@ -108,6 +110,7 @@ export function ChatPanel({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseDraftRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const sendLockRef = useRef(false);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) || null,
@@ -162,8 +165,9 @@ export function ChatPanel({
 
   async function handleSend() {
     const message = draft.trim();
-    if (!message || isSending) return;
+    if (!message || isSending || sendLockRef.current) return;
 
+    sendLockRef.current = true;
     setDraft("");
     setIsSending(true);
     setProviderStatus("헤더가 맥락을 확인하는 중");
@@ -192,7 +196,10 @@ export function ChatPanel({
       };
       const data = await resolveHeatherResponse(payload);
 
-      const assistantMessage = createMessage("assistant", data.message);
+      const assistantMessage = createMessage("assistant", data.message, "text", {
+        provider: data.provider,
+        model: data.model
+      });
       const finalConversation: Conversation = {
         ...optimisticConversation,
         title:
@@ -239,6 +246,7 @@ export function ChatPanel({
       });
       setProviderStatus("오류 발생");
     } finally {
+      sendLockRef.current = false;
       setInputSource("text");
       setIsSending(false);
     }
@@ -252,7 +260,11 @@ export function ChatPanel({
       };
     }
 
-    const cached = payload.settings.cacheResponses ? readCachedResponse(payload) : null;
+    const providerModelStatusQuestion = asksCurrentProviderOrModel(payload.message);
+    const cached =
+      payload.settings.cacheResponses && !providerModelStatusQuestion
+        ? readCachedResponse(payload)
+        : null;
     if (cached) {
       return {
         ...cached,
@@ -260,6 +272,14 @@ export function ChatPanel({
       };
     }
 
+    const data = isTauriRuntime()
+      ? await invokeTauriCommand<ApiChatResponse>("ollama_chat", { payload })
+      : await requestHeatherApi(payload);
+
+    return data;
+  }
+
+  async function requestHeatherApi(payload: ChatRequestPayload): Promise<ApiChatResponse> {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -272,10 +292,6 @@ export function ChatPanel({
 
     if (!response.ok || data.error) {
       throw new Error(data.error || "Heather chat request failed.");
-    }
-
-    if (payload.settings.cacheResponses) {
-      writeCachedResponse(payload, data);
     }
 
     return data;
@@ -453,13 +469,25 @@ export function ChatPanel({
                       message.role === "user" ? "text-heather-100" : "text-slate-400"
                     }`}
                   >
-                    <span>
-                      {message.source === "voice" ? "voice" : "text"} ·{" "}
-                      {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
-                        hour: "2-digit",
-                        minute: "2-digit"
-                      })}
-                    </span>
+                    {message.role === "assistant" ? (
+                      <>
+                        <span>{formatAssistantMetadata(message)}</span>
+                        <span>
+                          {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </span>
+                      </>
+                    ) : (
+                      <span>
+                        {message.source === "voice" ? "voice" : "text"} ·{" "}
+                        {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </span>
+                    )}
                     {message.role === "assistant" ? (
                       <button
                         type="button"
@@ -565,7 +593,7 @@ function formatProviderStatus(data: ApiChatResponse): string {
   }
 
   if (data.provider === "ollama") {
-    return "로컬 모델 응답";
+    return data.model ? `로컬 모델 응답 · ${data.model}` : "로컬 모델 응답";
   }
 
   if (data.provider === "browser-local") {
@@ -577,6 +605,10 @@ function formatProviderStatus(data: ApiChatResponse): string {
   }
 
   return "로컬 Heather 응답";
+}
+
+function formatAssistantMetadata(message: Conversation["messages"][number]): string {
+  return [message.provider, message.model].filter(Boolean).join(" · ") || "assistant";
 }
 
 function incrementPaidApiCount(settings: HeatherSettings): HeatherSettings {
@@ -613,6 +645,17 @@ function writeCachedResponse(payload: ChatRequestPayload, data: ApiChatResponse)
       cached: false
     })
   );
+}
+
+function asksCurrentProviderOrModel(message: string): boolean {
+  const normalized = message.toLowerCase();
+  const asksRuntime =
+    /모델|model|provider|프로바이더|제공자|엔진|backend|백엔드|api|런타임|runtime|상태|status|로컬\s*모델/.test(
+      normalized
+    );
+  const asksCurrent = /현재|지금|사용\s*중|쓰고|뭐야|무엇|알려|확인|check|current/.test(normalized);
+
+  return asksCurrent && asksRuntime;
 }
 
 function cacheKey(payload: ChatRequestPayload): string {

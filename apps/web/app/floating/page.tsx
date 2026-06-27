@@ -22,13 +22,14 @@ export default function FloatingLauncherPage() {
   }
 
   return (
-    <main className="floating-heather-root">
+    <main className="floating-heather-root" data-tauri-drag-region>
       <button
         type="button"
         onClick={() => void openHeather()}
         className="floating-heather-button"
         aria-label="Heather AI Assistant 열기"
         title="Heather AI Assistant"
+        data-tauri-drag-region
       >
         <Image src="/icons/heather-icon.svg" alt="" width={58} height={58} priority />
       </button>

@@ -2,6 +2,7 @@ node_modules
 .next
 out
 dist
+apps/web/out-tauri
 coverage
 *.tsbuildinfo
 .DS_Store

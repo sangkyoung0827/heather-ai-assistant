@@ -27,14 +27,16 @@ export function nowIso(): string {
 export function createMessage(
   role: ConversationMessage["role"],
   content: string,
-  source: ConversationMessage["source"] = "text"
+  source: ConversationMessage["source"] = "text",
+  metadata: Pick<ConversationMessage, "provider" | "model"> = {}
 ): ConversationMessage {
   return {
     id: createId("msg"),
     role,
     content,
     source,
-    createdAt: nowIso()
+    createdAt: nowIso(),
+    ...metadata
   };
 }
 
