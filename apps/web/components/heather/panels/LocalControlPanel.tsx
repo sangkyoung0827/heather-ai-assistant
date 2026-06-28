@@ -469,8 +469,7 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         action.name === "open_url" ||
         action.name === "open_external_url" ||
         action.name === "search_web" ||
-        action.name === "search_youtube" ||
-        action.name === "search_youtube_music"
+        action.name === "search_youtube"
       ) {
         const url = resolveActionUrl(action) || request.match(/https?:\/\/[^\s)"']+/)?.[0] || "";
         if (!url) throw new Error("열 URL을 찾지 못했습니다.");
@@ -483,10 +482,33 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
             query: action.args.query,
             url
           },
-          summaryForUser:
-            action.name === "search_youtube_music"
-              ? `YouTube Music에서 "${String(action.args.query || "")}" 검색 페이지를 열었습니다. 자동 재생은 하지 않았습니다.`
-              : `${url} 링크를 열었습니다.`
+          summaryForUser: `${url} 링크를 열었습니다.`
+        };
+      }
+
+      if (action.name === "search_youtube_music") {
+        const query = String(action.args.query || "");
+        if (desktopAdapter?.playYouTubeMusic && query) {
+          const result = await desktopAdapter.playYouTubeMusic(query);
+          return {
+            success: true,
+            actionName: action.name,
+            result,
+            summaryForUser: result.message
+          };
+        }
+
+        const url = resolveActionUrl(action);
+        await openSafeUrl(url);
+        return {
+          success: true,
+          actionName: action.name,
+          result: {
+            service: action.args.service,
+            query,
+            url
+          },
+          summaryForUser: `YouTube Music에서 "${query}" 검색 페이지를 열었습니다. 브라우저 권한이 허용되면 첫 결과를 재생할 수 있습니다.`
         };
       }
 
@@ -496,6 +518,19 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
         action.name === "media_next" ||
         action.name === "media_previous"
       ) {
+        if (action.name === "media_play") {
+          const query = String(action.args.query || request.replace(/헤더|재생|틀어|play|유튜브\s*뮤직|youtube\s*music/gi, "").trim());
+          if (desktopAdapter?.playYouTubeMusic && query) {
+            const result = await desktopAdapter.playYouTubeMusic(query);
+            return {
+              success: true,
+              actionName: action.name,
+              result,
+              summaryForUser: result.message
+            };
+          }
+        }
+
         return {
           success: false,
           actionName: action.name,
@@ -504,8 +539,7 @@ export function LocalControlPanel({ settings, onSaveSettings }: LocalControlPane
             service: action.args.service || "youtube_music",
             driver: "youtube_music"
           },
-          summaryForUser:
-            "YouTube Music media-key browser control is prepared, but automatic DOM playback control is still stabilizing. Open YouTube Music first and use the page controls."
+          summaryForUser: "이 미디어 제어는 아직 지원 범위 밖입니다. YouTube Music 재생 요청은 곡명을 포함해 다시 요청해주세요."
         };
       }
 

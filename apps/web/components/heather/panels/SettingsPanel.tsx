@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Cloud, Cpu, HardDrive, Mic, Monitor, ShieldCheck, Trash2, Volume2, WalletCards } from "lucide-react";
 import { ACCOUNT_PROFILES, PLATFORM_CAPABILITIES } from "@heather/core";
-import type { HeatherAIMode, HeatherSettings, HeatherTone } from "@heather/core";
+import type {
+  HeatherAIMode,
+  HeatherLanguage,
+  HeatherSettings,
+  HeatherTone,
+  HeatherVoiceProvider
+} from "@heather/core";
 import { WebPlatformAdapter } from "@heather/platform";
 
 interface SettingsPanelProps {
@@ -44,6 +50,17 @@ const AI_MODE_OPTIONS: Array<{
   }
 ];
 
+const LANGUAGE_OPTIONS: Array<{ value: HeatherLanguage; label: string; detail: string }> = [
+  { value: "en", label: "English", detail: "Default" },
+  { value: "ko", label: "한국어", detail: "Korean first" },
+  { value: "auto", label: "Auto", detail: "Follow user" }
+];
+
+const VOICE_PROVIDER_OPTIONS: Array<{ value: HeatherVoiceProvider; label: string }> = [
+  { value: "elevenlabs", label: "ElevenLabs Heather" },
+  { value: "browser", label: "Browser voice" }
+];
+
 export function SettingsPanel({ settings, onSaveSettings, onClearAll }: SettingsPanelProps) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [micStatus, setMicStatus] = useState("확인 전");
@@ -74,19 +91,60 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
     setMicStatus(allowed ? "허용됨" : "거부 또는 미지원");
   }
 
-  function testVoice() {
+  async function testVoice() {
+    const sampleText =
+      settings.defaultLanguage === "ko"
+        ? "안녕, 나는 헤더야. 오늘은 무엇을 도와주면 좋을까?"
+        : "The first move sets everything in motion.";
+
+    if (settings.voiceProvider === "elevenlabs" && settings.elevenLabsVoiceId.trim()) {
+      setVoiceTestStatus("ElevenLabs 요청 중");
+      try {
+        const response = await fetch("/api/tts/elevenlabs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            text: sampleText,
+            voiceId: settings.elevenLabsVoiceId,
+            modelId: settings.elevenLabsModelId || "eleven_v3"
+          })
+        });
+
+        if (response.ok) {
+          const audio = new Audio(URL.createObjectURL(await response.blob()));
+          audio.onplay = () => setVoiceTestStatus("ElevenLabs 재생 중");
+          audio.onended = () => {
+            URL.revokeObjectURL(audio.src);
+            setVoiceTestStatus("재생 완료");
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(audio.src);
+            setVoiceTestStatus("ElevenLabs 재생 실패");
+          };
+          await audio.play();
+          return;
+        }
+      } catch {
+        setVoiceTestStatus("ElevenLabs 사용 불가, 브라우저 음성으로 대체");
+      }
+    }
+
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       setVoiceTestStatus("이 환경은 음성 출력을 지원하지 않습니다.");
       return;
     }
 
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance("안녕, 나는 헤더야. 오늘은 무엇을 도와주면 좋을까?");
-    utterance.lang = "ko-KR";
-    utterance.rate = 1;
+    const utterance = new SpeechSynthesisUtterance(sampleText);
+    utterance.lang = settings.defaultLanguage === "ko" ? "ko-KR" : "en-US";
+    utterance.rate = 1.04;
     utterance.pitch = 1.02;
     const selectedVoice =
       voices.find((voice) => voice.name === settings.voiceName) ||
+      voices.find((voice) => voice.lang.toLowerCase().startsWith(utterance.lang.slice(0, 2).toLowerCase())) ||
+      voices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ||
       voices.find((voice) => voice.lang.toLowerCase().startsWith("ko"));
     if (selectedVoice) {
       utterance.voice = selectedVoice;
@@ -126,6 +184,27 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
                 }`}
               >
                 {option.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="space-y-3 border-b border-line pb-4">
+          <h4 className="font-semibold">Default Language</h4>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {LANGUAGE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => void update({ defaultLanguage: option.value })}
+                className={`rounded-lg border px-3 py-3 text-sm font-semibold transition ${
+                  settings.defaultLanguage === option.value
+                    ? "border-heather-500 bg-heather-50 text-heather-900"
+                    : "border-line bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <span className="block">{option.label}</span>
+                <span className="mt-1 block text-xs font-medium">{option.detail}</span>
               </button>
             ))}
           </div>
@@ -212,6 +291,40 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
             checked={settings.voiceAutoReadEnabled}
             onChange={(checked) => void update({ voiceAutoReadEnabled: checked })}
           />
+          <div className="grid gap-2 sm:grid-cols-2">
+            {VOICE_PROVIDER_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => void update({ voiceProvider: option.value })}
+                className={`rounded-lg border px-3 py-3 text-sm font-semibold transition ${
+                  settings.voiceProvider === option.value
+                    ? "border-heather-500 bg-heather-50 text-heather-900"
+                    : "border-line bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="text-sm font-medium">ElevenLabs Voice ID</span>
+              <input
+                value={settings.elevenLabsVoiceId}
+                onChange={(event) => void update({ elevenLabsVoiceId: event.target.value })}
+                className="mt-1 h-11 w-full rounded-lg border border-line px-3"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium">ElevenLabs Model</span>
+              <input
+                value={settings.elevenLabsModelId}
+                onChange={(event) => void update({ elevenLabsModelId: event.target.value })}
+                className="mt-1 h-11 w-full rounded-lg border border-line px-3"
+              />
+            </label>
+          </div>
           <label className="block">
             <span className="text-sm font-medium">목소리 선택</span>
             <select
@@ -230,7 +343,7 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={testVoice}
+              onClick={() => void testVoice()}
               className="flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
             >
               <Volume2 className="h-4 w-4 text-heather-700" />

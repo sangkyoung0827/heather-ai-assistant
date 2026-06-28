@@ -10,8 +10,8 @@ export const metadata: Metadata = {
     title: "Heather"
   },
   icons: {
-    icon: "/icons/heather-icon.png",
-    apple: "/icons/heather-icon.png"
+    icon: "/icons/heather-avatar.png",
+    apple: "/icons/heather-avatar.png"
   }
 };
 

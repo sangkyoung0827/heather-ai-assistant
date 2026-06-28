@@ -109,7 +109,7 @@ export const ALLOWED_HEATHER_ACTIONS: Array<{
   },
   {
     name: "search_youtube_music",
-    description: "YouTube Music 검색 결과 페이지를 엽니다. 자동 재생은 하지 않습니다.",
+    description: "YouTube Music에서 재생을 시도합니다. 브라우저 권한이 막으면 검색 페이지를 엽니다.",
     riskLevel: "medium",
     requiresConfirmation: true
   },
@@ -295,7 +295,7 @@ export function createActionPlanFromRequest(input: string): HeatherAction[] {
     actions.push(
       createAction({
         name: "search_youtube_music",
-        description: `YouTube Music에서 "${musicQuery}" 검색 페이지를 엽니다. 자동 재생은 하지 않습니다.`,
+        description: `YouTube Music에서 "${musicQuery}" 재생을 시도합니다. 브라우저 권한이 막으면 검색 페이지를 엽니다.`,
         args: {
           intent: /재생|틀어|play/i.test(input) ? "play_music" : "music_search",
           accountProfileId: "media",

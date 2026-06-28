@@ -119,6 +119,16 @@ struct DesktopChatResponse {
     model: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaActionResult {
+    service: String,
+    query: String,
+    url: String,
+    attempted_autoplay: bool,
+    message: String,
+}
+
 #[derive(Deserialize)]
 struct OllamaTagsResponse {
     models: Option<Vec<OllamaModelEntry>>,
@@ -308,6 +318,35 @@ fn open_app(app_name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn play_youtube_music(query: String) -> Result<MediaActionResult, String> {
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        return Err("YouTube Music에서 재생할 검색어가 필요합니다.".to_string());
+    }
+
+    let url = format!(
+        "https://music.youtube.com/search?q={}",
+        encode_url_component(trimmed_query)
+    );
+    let attempted_autoplay = try_youtube_music_autoplay(&url).unwrap_or_else(|_| {
+        let _ = open_url_with_system(&url);
+        false
+    });
+
+    Ok(MediaActionResult {
+        service: "youtube_music".to_string(),
+        query: trimmed_query.to_string(),
+        url,
+        attempted_autoplay,
+        message: if attempted_autoplay {
+            format!("YouTube Music에서 \"{trimmed_query}\" 재생을 시도했습니다.")
+        } else {
+            format!("YouTube Music에서 \"{trimmed_query}\" 검색 페이지를 열었습니다. 브라우저 자동 재생 권한이 필요하면 첫 결과를 직접 눌러주세요.")
+        },
+    })
+}
+
+#[tauri::command]
 fn get_clipboard_text() -> Result<ClipboardText, String> {
     let text = read_clipboard_text()?;
     Ok(ClipboardText {
@@ -361,9 +400,7 @@ fn ollama_chat(payload: Value) -> Result<DesktopChatResponse, String> {
     let configured_model = value_string(settings, &["ollamaModel"])
         .or_else(|| value_string(settings, &["ollama_model"]))
         .unwrap_or_else(|| "gemma4:latest".to_string());
-    let models = list_ollama_models(&base_url)?;
-    let model = resolve_ollama_model(&models, &configured_model)
-        .ok_or_else(|| format!("{configured_model} 모델을 찾지 못했습니다. 설치 모델을 확인하세요."))?;
+    let model = configured_model;
 
     if asks_current_provider_or_model(&message) {
         return Ok(DesktopChatResponse {
@@ -440,6 +477,7 @@ pub fn run() {
             read_text_file,
             open_external_url,
             open_app,
+            play_youtube_music,
             get_clipboard_text,
             set_clipboard_text,
             ollama_status,
@@ -567,7 +605,7 @@ fn send_ollama_chat(base_url: &str, model: &str, messages: Vec<Value>) -> Result
         "messages": messages,
         "options": {
             "temperature": 0.6,
-            "num_predict": 1200
+            "num_predict": 900
         }
     })
     .to_string();
@@ -583,12 +621,19 @@ fn build_ollama_messages(payload: &Value, message: &str, model: &str) -> Result<
         "direct" => "말투는 직설적이고 짧게, 핵심 판단과 다음 행동을 먼저 말한다.",
         _ => "말투는 분석적이고 논리적으로, 근거와 비교 기준을 분명히 제시한다.",
     };
+    let default_language =
+        value_string(settings, &["defaultLanguage"]).unwrap_or_else(|| "en".to_string());
+    let language_instruction = match default_language.as_str() {
+        "ko" => "기본 응답 언어는 한국어다. 사용자가 영어로 말하면 자연스럽게 영어로 답할 수 있다.",
+        "auto" => "사용자가 쓴 언어를 따라 답한다. 한국어와 영어를 모두 자연스럽게 사용할 수 있다.",
+        _ => "Default response language is English. If the user writes in Korean or explicitly asks for Korean, answer naturally in Korean. You can use both Korean and English fluently.",
+    };
 
     let system_prompt = [
         "너는 Heather / 헤더, 사용자의 개인 AI 비서다.".to_string(),
         "너는 단순 챗봇이 아니라 프로젝트, 일정, 관계 분석, 문서 작성, 음성 대화, 장기 기억을 돕는다.".to_string(),
         tone_instruction.to_string(),
-        "답변은 한국어를 기본으로 하며, 사용자가 영어를 쓰면 자연스럽게 영어도 섞을 수 있다.".to_string(),
+        language_instruction.to_string(),
         "파일 삭제, 외부 게시, 결제, 이메일 발송, 로컬 앱 실행 같은 위험 작업은 반드시 사용자 확인이 필요하다고 말한다.".to_string(),
         format!("현재 실행 환경: provider=ollama, model={model}. 사용자가 현재 모델명이나 provider를 물으면 이 값을 직접 답한다."),
         "하드 응답 규칙: 사용자가 현재 모델, provider, backend, API 상태, 로컬 모델, 런타임 상태를 물으면 provider와 model 값을 직접 짧게 답한다.".to_string(),
@@ -877,6 +922,60 @@ fn value_string(value: &Value, path: &[&str]) -> Option<String> {
         cursor = cursor.get(*key)?;
     }
     cursor.as_str().map(str::to_string)
+}
+
+fn encode_url_component(input: &str) -> String {
+    input
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+fn try_youtube_music_autoplay(url: &str) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"
+on run argv
+  set targetUrl to item 1 of argv
+  tell application "Google Chrome"
+    activate
+    if not (exists window 1) then make new window
+    set URL of active tab of front window to targetUrl
+  end tell
+  delay 3
+  tell application "Google Chrome"
+    tell active tab of front window
+      set jsResult to execute javascript "(() => { const selectors = ['ytmusic-responsive-list-item-renderer a.yt-simple-endpoint', 'ytmusic-card-shelf-renderer a.yt-simple-endpoint']; const link = selectors.map((selector) => document.querySelector(selector)).find(Boolean); if (link) { link.click(); return 'clicked-result'; } const play = document.querySelector('ytmusic-player-bar #play-pause-button'); if (play && /play/i.test(play.getAttribute('title') || '')) { play.click(); return 'clicked-play'; } return 'no-play-target'; })();"
+    end tell
+  end tell
+  return jsResult
+end run
+"#;
+        let output = Command::new("osascript")
+            .args(["-e", script, url])
+            .output()
+            .map_err(|error| error.to_string())?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        if output.status.success()
+            && (stdout.contains("clicked-result") || stdout.contains("clicked-play"))
+        {
+            return Ok(true);
+        }
+
+        open_url_with_system(url)?;
+        return Ok(false);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        open_url_with_system(url)?;
+        Ok(false)
+    }
 }
 
 fn resolve_allowed_dir(folder_id: &str, state: &State<DesktopState>) -> Result<PathBuf, String> {

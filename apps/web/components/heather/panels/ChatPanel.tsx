@@ -31,6 +31,7 @@ import type {
   TeachingRecord
 } from "@heather/core";
 import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
+import type { MediaActionResult } from "@heather/platform";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -87,6 +88,9 @@ type WindowWithSpeechRecognition = Window & {
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
 };
 
+let activeHeatherAudio: HTMLAudioElement | null = null;
+let activeHeatherAudioUrl: string | null = null;
+
 export function ChatPanel({
   conversations,
   memories,
@@ -141,9 +145,7 @@ export function ChatPanel({
 
   useEffect(() => {
     return () => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
+      stopHeatherSpeech();
     };
   }, []);
 
@@ -194,7 +196,7 @@ export function ChatPanel({
         teachings,
         automationRecipes
       };
-      const data = await resolveHeatherResponse(payload);
+      const data = (await resolveImmediateDesktopAction(message)) || (await resolveHeatherResponse(payload));
 
       const assistantMessage = createMessage("assistant", data.message, "text", {
         provider: data.provider,
@@ -229,7 +231,7 @@ export function ChatPanel({
       }
 
       if (settings.voiceOutputEnabled && settings.voiceAutoReadEnabled) {
-        speakHeather(data.message, settings.voiceName, {
+        void speakHeather(data.message, settings, {
           onStart: () => setSpeakingMessageId(assistantMessage.id),
           onEnd: () => setSpeakingMessageId(null)
         });
@@ -279,6 +281,30 @@ export function ChatPanel({
     return data;
   }
 
+  async function resolveImmediateDesktopAction(message: string): Promise<ApiChatResponse | null> {
+    if (!isTauriRuntime()) return null;
+
+    const musicQuery = extractYouTubeMusicPlayQuery(message);
+    if (musicQuery) {
+      const result = await invokeTauriCommand<MediaActionResult>("play_youtube_music", {
+        query: musicQuery
+      });
+      return {
+        message: result.message,
+        title: generateConversationTitle(message),
+        risk: {
+          level: "low",
+          requiresConfirmation: false,
+          reason: "허용된 YouTube Music 데스크톱 액션입니다."
+        },
+        provider: "desktop",
+        model: "tauri-action"
+      };
+    }
+
+    return null;
+  }
+
   async function requestHeatherApi(payload: ChatRequestPayload): Promise<ApiChatResponse> {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -315,7 +341,7 @@ export function ChatPanel({
 
     const recognition = new SpeechRecognition();
     voiceBaseDraftRef.current = draft.trim();
-    recognition.lang = "ko-KR";
+    recognition.lang = settings.defaultLanguage === "ko" ? "ko-KR" : "en-US";
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.onresult = (event) => {
@@ -358,7 +384,7 @@ export function ChatPanel({
       return;
     }
 
-    speakHeather(text, settings.voiceName, {
+    void speakHeather(text, settings, {
       onStart: () => setSpeakingMessageId(messageId),
       onEnd: () => setSpeakingMessageId(null)
     });
@@ -658,6 +684,23 @@ function asksCurrentProviderOrModel(message: string): boolean {
   return asksCurrent && asksRuntime;
 }
 
+function extractYouTubeMusicPlayQuery(message: string): string | null {
+  const normalized = message.toLowerCase();
+  const asksYouTubeMusic = /유튜브\s*뮤직|youtube\s*music/.test(normalized);
+  const asksPlayback = /재생|틀어|들려|play/.test(normalized);
+  if (!asksYouTubeMusic || !asksPlayback) return null;
+
+  const query = message
+    .replace(/^\s*헤더[,\s]*/i, "")
+    .replace(/유튜브\s*뮤직(에서|으로)?/gi, "")
+    .replace(/youtube\s*music/gi, "")
+    .replace(/재생해줘|재생해 줘|재생|틀어줘|틀어 줘|틀어|들려줘|들려 줘|들려|play/gi, "")
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
+
+  return query || null;
+}
+
 function cacheKey(payload: ChatRequestPayload): string {
   const compact = JSON.stringify({
     message: payload.message.trim().toLowerCase(),
@@ -707,26 +750,89 @@ function hashString(value: string): string {
 
 function stopHeatherSpeech() {
   if (typeof window === "undefined") return;
-  if (!("speechSynthesis" in window)) return;
 
-  window.speechSynthesis.cancel();
+  if (activeHeatherAudio) {
+    activeHeatherAudio.pause();
+    activeHeatherAudio = null;
+  }
+
+  if (activeHeatherAudioUrl) {
+    URL.revokeObjectURL(activeHeatherAudioUrl);
+    activeHeatherAudioUrl = null;
+  }
+
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
 }
 
-function speakHeather(
+async function speakHeather(
   text: string,
-  voiceName: string,
+  settings: HeatherSettings,
   callbacks: {
     onStart?: () => void;
     onEnd?: () => void;
   } = {}
 ) {
   if (typeof window === "undefined") return false;
+
+  stopHeatherSpeech();
+  const speechText = cleanSpeechText(text);
+
+  if (settings.voiceProvider === "elevenlabs" && settings.elevenLabsVoiceId.trim()) {
+    try {
+      const response = await fetch("/api/tts/elevenlabs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text: speechText,
+          voiceId: settings.elevenLabsVoiceId,
+          modelId: settings.elevenLabsModelId || "eleven_v3"
+        })
+      });
+
+      if (response.ok) {
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        activeHeatherAudio = audio;
+        activeHeatherAudioUrl = audioUrl;
+        audio.onplay = () => callbacks.onStart?.();
+        audio.onended = () => {
+          callbacks.onEnd?.();
+          if (activeHeatherAudio === audio) {
+            activeHeatherAudio = null;
+          }
+          URL.revokeObjectURL(audioUrl);
+          if (activeHeatherAudioUrl === audioUrl) {
+            activeHeatherAudioUrl = null;
+          }
+        };
+        audio.onerror = () => {
+          callbacks.onEnd?.();
+          if (activeHeatherAudio === audio) {
+            activeHeatherAudio = null;
+          }
+          URL.revokeObjectURL(audioUrl);
+          if (activeHeatherAudioUrl === audioUrl) {
+            activeHeatherAudioUrl = null;
+          }
+        };
+        await audio.play();
+        return true;
+      }
+    } catch {
+      // Fall back to the browser TTS engine when ElevenLabs is unavailable.
+    }
+  }
+
   if (!("speechSynthesis" in window)) return false;
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text.replace(/[#*_`>-]/g, ""));
-  utterance.lang = "ko-KR";
-  utterance.rate = 1;
+  const utterance = new SpeechSynthesisUtterance(speechText);
+  utterance.lang = detectSpeechLanguage(speechText, settings);
+  utterance.rate = 1.04;
   utterance.pitch = 1.02;
   utterance.onstart = callbacks.onStart || null;
   utterance.onend = callbacks.onEnd || null;
@@ -734,13 +840,26 @@ function speakHeather(
 
   const voices = window.speechSynthesis.getVoices();
   const selectedVoice =
-    voices.find((voice) => voice.name === voiceName) ||
+    voices.find((voice) => voice.name === settings.voiceName) ||
+    voices.find((voice) => voice.lang.toLowerCase().startsWith(utterance.lang.slice(0, 2).toLowerCase())) ||
+    voices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ||
     voices.find((voice) => voice.lang.toLowerCase().startsWith("ko"));
 
   if (selectedVoice) {
     utterance.voice = selectedVoice;
   }
 
+  window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
   return true;
+}
+
+function cleanSpeechText(text: string): string {
+  return text.replace(/[#*_`>-]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function detectSpeechLanguage(text: string, settings: HeatherSettings): string {
+  if (settings.defaultLanguage === "ko") return "ko-KR";
+  if (settings.defaultLanguage === "en") return /[가-힣]/.test(text) ? "ko-KR" : "en-US";
+  return /[가-힣]/.test(text) ? "ko-KR" : "en-US";
 }

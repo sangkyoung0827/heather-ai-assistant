@@ -1,5 +1,7 @@
 export type HeatherTone = "soft" | "analytical" | "direct";
 export type HeatherAIMode = "local_only" | "local_model" | "cloud_allowed";
+export type HeatherLanguage = "en" | "ko" | "auto";
+export type HeatherVoiceProvider = "browser" | "elevenlabs";
 export type TeachingType =
   | "directive"
   | "preference"
@@ -269,9 +271,13 @@ export interface HeatherSettings {
   apiCallsThisMonth: number;
   apiUsageMonth: string;
   cacheResponses: boolean;
+  defaultLanguage: HeatherLanguage;
   voiceOutputEnabled: boolean;
   voiceAutoReadEnabled: boolean;
+  voiceProvider: HeatherVoiceProvider;
   voiceName: string;
+  elevenLabsVoiceId: string;
+  elevenLabsModelId: string;
   memoryEnabled: boolean;
   projectMemoryEnabled: boolean;
   confirmRiskyActions: boolean;

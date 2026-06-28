@@ -112,7 +112,7 @@ export function HeatherWorkspace() {
         <aside className="hud-sidebar flex shrink-0 flex-col gap-4 p-4 lg:h-[calc(100vh-2rem)] lg:w-[300px]">
           <div className="hud-profile flex items-center gap-3 pb-4">
             <div className="hud-avatar-shell">
-              <Image src="/icons/heather-icon.png" alt="" width={86} height={86} className="hud-avatar-img" />
+              <Image src="/icons/heather-avatar.png" alt="" width={86} height={86} className="hud-avatar-img" unoptimized />
             </div>
             <div>
               <p className="text-sm font-semibold text-cyan-200">Heather AI Assistant</p>

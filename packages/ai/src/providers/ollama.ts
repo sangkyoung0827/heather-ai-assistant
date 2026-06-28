@@ -128,7 +128,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     messages: ChatMessage[],
     options: ChatOptions = {}
   ): Promise<ProviderChatResponse> {
-    const model = await resolveModel(options.model || defaultModel);
+    const model = options.model || defaultModel;
     return sendChat(messages, model, options);
   }
 
@@ -152,7 +152,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 1200
+            num_predict: options.maxTokens || 900
           }
         })
       });
@@ -214,7 +214,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           content: message.content.slice(0, 700)
         }));
 
-      const model = await resolveModel(payload.settings.ollamaModel || defaultModel);
+      const model = payload.settings.ollamaModel || defaultModel;
       const executionContext = `현재 실행 환경: provider=ollama, model=${model}. 사용자가 현재 모델명이나 provider를 물으면 이 값을 직접 답한다.`;
 
       if (asksCurrentProviderOrModel(payload.message)) {
@@ -247,7 +247,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
         model,
         {
           temperature: 0.6,
-          maxTokens: 1200
+          maxTokens: 900
         }
       );
 
@@ -273,7 +273,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 1200
+            num_predict: options.maxTokens || 900
           }
         })
       });
@@ -318,7 +318,7 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           stream: false,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 1200
+            num_predict: options.maxTokens || 900
           }
         })
       });

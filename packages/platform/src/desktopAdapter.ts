@@ -2,6 +2,7 @@ import type {
   AllowedDirectory,
   FileItem,
   FileSearchOptions,
+  MediaActionResult,
   PlatformAdapter,
   SystemInfo,
   TextFileReadResult
@@ -94,6 +95,10 @@ export class TauriDesktopPlatformAdapter implements PlatformAdapter {
 
   async openLocalApp(appName: string): Promise<void> {
     await invokeTauri("open_app", { appName });
+  }
+
+  async playYouTubeMusic(query: string): Promise<MediaActionResult> {
+    return invokeTauri<MediaActionResult>("play_youtube_music", { query });
   }
 
   async getClipboardText(): Promise<string> {

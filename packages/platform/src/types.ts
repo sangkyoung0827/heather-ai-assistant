@@ -35,6 +35,14 @@ export interface TextFileReadResult {
   truncated: boolean;
 }
 
+export interface MediaActionResult {
+  service: "youtube_music";
+  query: string;
+  url: string;
+  attemptedAutoplay: boolean;
+  message: string;
+}
+
 export interface PlatformAdapter {
   getPlatformName(): "web" | "desktop";
   getSystemInfo?(): Promise<SystemInfo>;
@@ -46,6 +54,7 @@ export interface PlatformAdapter {
   readTextFile?(fileId: string): Promise<TextFileReadResult>;
   openExternalUrl(url: string): Promise<void>;
   openLocalApp?(appName: string): Promise<void>;
+  playYouTubeMusic?(query: string): Promise<MediaActionResult>;
   captureScreen?(): Promise<Blob>;
   getClipboardText?(): Promise<string>;
   setClipboardText?(text: string): Promise<void>;

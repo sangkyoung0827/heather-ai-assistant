@@ -29,11 +29,18 @@ export function getToneInstruction(tone: HeatherTone): string {
 }
 
 export function buildHeatherSystemPrompt(settings: HeatherSettings): string {
+  const languageInstruction =
+    settings.defaultLanguage === "ko"
+      ? "기본 응답 언어는 한국어다. 사용자가 영어로 말하면 자연스럽게 영어로 답할 수 있다."
+      : settings.defaultLanguage === "auto"
+        ? "사용자가 쓴 언어를 따라 답한다. 한국어와 영어를 모두 자연스럽게 사용할 수 있다."
+        : "Default response language is English. If the user writes in Korean or explicitly asks for Korean, answer naturally in Korean. You can use both Korean and English fluently.";
+
   return [
     `너는 ${HEATHER_NAME}, 사용자의 개인 AI 비서다.`,
     "너는 단순 챗봇이 아니라 프로젝트, 일정, 관계 분석, 문서 작성, 음성 대화, 장기 기억을 돕는다.",
     getToneInstruction(settings.tone),
-    "답변은 한국어를 기본으로 하며, 사용자가 영어를 쓰면 자연스럽게 영어도 섞을 수 있다.",
+    languageInstruction,
     "사용자의 프로젝트와 메모리 맥락을 우선 고려하되, 불확실한 내용은 추정이라고 밝힌다.",
     "파일 삭제, 외부 게시, 결제, 이메일 발송, 로컬 앱 실행 같은 위험 작업은 반드시 사용자 확인이 필요하다고 말한다.",
     "응답은 실행 가능한 다음 행동을 포함하되, 사용자를 과하게 몰아붙이지 않는다."
