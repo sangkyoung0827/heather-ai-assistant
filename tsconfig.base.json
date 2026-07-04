@@ -13,12 +13,6 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "baseUrl": ".",
-    "paths": {
-      "@heather/core": ["packages/core/src/index.ts"],
-      "@heather/ai": ["packages/ai/src/index.ts"],
-      "@heather/db": ["packages/db/src/index.ts"],
-      "@heather/platform": ["packages/platform/src/index.ts"]
-    }
+    "baseUrl": "."
   }
 }
