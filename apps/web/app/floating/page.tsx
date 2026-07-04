@@ -1,117 +1,18 @@
-"use client";
+import Link from "next/link";
 
-import { useEffect, useRef } from "react";
-import type { PointerEvent } from "react";
-import Image from "next/image";
-
-type FloatingWindowHandle = {
-  outerPosition(): Promise<{ x: number; y: number }>;
-  setPosition(position: unknown): Promise<void>;
-};
-
-type PhysicalPositionConstructor = new (x: number, y: number) => unknown;
-
-type DragState = {
-  window: FloatingWindowHandle;
-  PhysicalPosition: PhysicalPositionConstructor;
-  pointerId: number;
-  startPointerX: number;
-  startPointerY: number;
-  startWindowX: number;
-  startWindowY: number;
-  moved: boolean;
-};
-
-export default function FloatingLauncherPage() {
-  const dragStateRef = useRef<DragState | null>(null);
-
-  useEffect(() => {
-    const previousBackground = document.body.style.background;
-    document.body.style.background = "transparent";
-    return () => {
-      document.body.style.background = previousBackground;
-    };
-  }, []);
-
-  async function openHeather() {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("show_heather");
-    } catch {
-      window.location.href = "/";
-    }
-  }
-
-  async function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) return;
-
-    event.currentTarget.setPointerCapture(event.pointerId);
-    try {
-      const [{ getCurrentWindow }, { PhysicalPosition }] = await Promise.all([
-        import("@tauri-apps/api/window"),
-        import("@tauri-apps/api/dpi")
-      ]);
-      const currentWindow = getCurrentWindow() as FloatingWindowHandle;
-      const position = await currentWindow.outerPosition();
-      dragStateRef.current = {
-        window: currentWindow,
-        PhysicalPosition,
-        pointerId: event.pointerId,
-        startPointerX: event.screenX,
-        startPointerY: event.screenY,
-        startWindowX: position.x,
-        startWindowY: position.y,
-        moved: false
-      };
-    } catch {
-      dragStateRef.current = null;
-    }
-  }
-
-  function handlePointerMove(event: PointerEvent<HTMLButtonElement>) {
-    const state = dragStateRef.current;
-    if (!state || state.pointerId !== event.pointerId) return;
-
-    const deltaX = event.screenX - state.startPointerX;
-    const deltaY = event.screenY - state.startPointerY;
-    if (Math.abs(deltaX) + Math.abs(deltaY) > 4) {
-      state.moved = true;
-    }
-
-    void state.window.setPosition(
-      new state.PhysicalPosition(
-        Math.round(state.startWindowX + deltaX),
-        Math.round(state.startWindowY + deltaY)
-      )
-    );
-  }
-
-  function handlePointerUp(event: PointerEvent<HTMLButtonElement>) {
-    const state = dragStateRef.current;
-    dragStateRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-
-    if (!state?.moved) {
-      void openHeather();
-    }
-  }
-
+export default function FloatingRouteDeprecatedPage() {
   return (
-    <main className="floating-heather-root">
-      <button
-        type="button"
-        onPointerDown={(event) => void handlePointerDown(event)}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={() => {
-          dragStateRef.current = null;
-        }}
-        className="floating-heather-button"
-        aria-label="Heather AI Assistant 열기"
-        title="Heather AI Assistant"
-      >
-        <Image src="/icons/heather-avatar.png" alt="" width={68} height={68} priority unoptimized />
-      </button>
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
+      <section className="max-w-md rounded-3xl border border-cyan-400/20 bg-slate-900 p-6 text-center shadow-2xl shadow-cyan-950/30">
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-cyan-300">Heather Web Mode</p>
+        <h1 className="mt-3 text-2xl font-semibold text-white">Desktop launcher removed</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          Heather 1.0 is now a web-first assistant. Use the browser dashboard instead of the old floating desktop route.
+        </p>
+        <Link href="/" className="mt-6 inline-flex rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950">
+          Open Heather dashboard
+        </Link>
+      </section>
     </main>
   );
 }
