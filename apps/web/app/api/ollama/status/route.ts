@@ -1,66 +1,35 @@
 import { NextResponse } from "next/server";
-import { createOllamaProvider } from "@heather/ai";
 
 export const runtime = "nodejs";
 
-interface OllamaStatusRequest {
+type OllamaStatusRequest = {
   baseUrl?: string;
   model?: string;
-}
+};
 
 const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
 
-export async function POST(request: Request) {
-  const payload = (await request.json().catch(() => ({}))) as OllamaStatusRequest;
-  const baseUrl =
-    process.env.HEATHER_OLLAMA_BASE_URL ||
-    process.env.OLLAMA_BASE_URL ||
-    payload.baseUrl ||
-    "http://localhost:11434";
-  const model =
-    process.env.HEATHER_OLLAMA_MODEL ||
-    process.env.OLLAMA_MODEL ||
-    payload.model ||
-    DEFAULT_OLLAMA_MODEL;
-  const provider = createOllamaProvider({ baseUrl, model });
-  let models: string[] = [];
-  let available = false;
-  let message = "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요.";
-
-  try {
-    models = await provider.listModels?.() || [];
-    const selectedModel = selectModel(model, models);
-    available = Boolean(selectedModel);
-    if (selectedModel) {
-      message =
-        selectedModel === model
-          ? "Ollama 연결 가능"
-          : `Ollama 연결 가능: ${selectedModel} 모델을 사용합니다.`;
-    } else {
-      message = `Ollama에 설치된 모델이 없습니다. 먼저 \`ollama pull ${DEFAULT_OLLAMA_MODEL.replace(":latest", "")}\` 실행 후 다시 시도하세요.`;
-    }
-  } catch (error) {
-    available = false;
-    message =
-      error instanceof Error
-        ? error.message
-        : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요.";
-  }
-
+export async function GET() {
   return NextResponse.json({
-    available,
-    baseUrl,
-    configuredModel: model,
-    model: selectModel(model, models) || model,
-    models,
-    message
+    available: false,
+    mode: "web-only",
+    configuredModel: DEFAULT_OLLAMA_MODEL,
+    model: DEFAULT_OLLAMA_MODEL,
+    models: [],
+    message: "Heather 1.0 web MVP does not require Ollama. Local model status is disabled in web-only deployment."
   });
 }
 
-function selectModel(requestedModel: string, models: string[]): string {
-  return (
-    models.find((model) => model === requestedModel) ||
-    models.find((model) => model.replace(/:latest$/, "") === requestedModel.replace(/:latest$/, "")) ||
-    ""
-  );
+export async function POST(request: Request) {
+  const payload = (await request.json().catch(() => ({}))) as OllamaStatusRequest;
+  const model = payload.model?.trim() || DEFAULT_OLLAMA_MODEL;
+
+  return NextResponse.json({
+    available: false,
+    mode: "web-only",
+    configuredModel: model,
+    model,
+    models: [],
+    message: "Heather 1.0 web MVP is running without desktop/local Ollama integration."
+  });
 }
