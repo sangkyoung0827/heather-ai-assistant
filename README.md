@@ -1,76 +1,53 @@
-# Heather AI Assistant
+# Heather AI Assistant / 헤더
 
-Heather / 헤더 is a personal AI assistant web app designed as a PWA first and as a future Tauri or Electron desktop front end later.
+Heather 1.0 is a clean web-first MVP for a Jarvis-like personal AI assistant.
 
-The repository is split so browser UI, assistant reasoning, AI providers, database access, and platform capabilities stay separate:
+This rebuild intentionally abandons the tangled older implementation path. Git history is preserved, but the active app surface is now a simple deployable Next.js web app with no desktop/Tauri runtime dependency.
 
-- `apps/web`: Next.js App Router PWA.
-- `packages/core`: Pure TypeScript assistant logic, persona, summaries, analysis, briefing, and safety policy.
-- `packages/core/src/automation.ts`: Jarvis-inspired automation recipe planning for web-safe and desktop-only actions.
-- `packages/ai`: AI provider adapters. OpenAI is called only from the server route.
-- `packages/db`: Repository interfaces plus browser-local storage for the phase 1 build.
-- `packages/platform`: Web and future desktop platform adapters.
+## Current scope
 
-## Quick Start
+- Main dashboard
+- Chat panel
+- Left sidebar
+- Web Mode badge
+- Action Log panel
+- Projects placeholder
+- Memory placeholder
+- Settings placeholder
+- Dark Jarvis-inspired UI
+- API route at `/api/chat`
+
+## Stack
+
+- Next.js App Router
+- TypeScript
+- Tailwind CSS
+- API routes
+- Web app only
+
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open `http://localhost:3000`.
+Open `http://localhost:3000`.
 
-## Environment
-
-Heather is offline-first by default. The app will not call OpenAI just because an API key exists.
-
-Create `.env.local` inside `apps/web` only when you explicitly want live OpenAI responses:
+## Checks
 
 ```bash
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini
-HEATHER_ALLOW_PAID_API=true
+npm run typecheck
+npm run lint
+npm run build
 ```
 
-If no API key is present, or `HEATHER_ALLOW_PAID_API` is not set to `true`, Heather uses the local deterministic assistant in `packages/core` so the app remains usable offline.
+## Deployment
 
-For no-credit local model responses, run an Ollama-compatible server and set:
+The repository includes `vercel.json` for a Vercel-connected Next.js deployment:
 
-```bash
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=gemma4:latest
-```
+- install command: `npm install`
+- build command: `npm run build -w @heather/web`
+- output directory: `apps/web/.next`
 
-Cost-control defaults:
-
-- `local_only` is the default and does not call `/api/chat` from the browser.
-- Repeated cloud/local-model requests are cached in browser storage and in the server route.
-- Paid API calls require the Settings toggle, a monthly call limit above zero, and `HEATHER_ALLOW_PAID_API=true`.
-- OpenAI context and output tokens are intentionally capped.
-- Heather does not implement payment bypasses or unauthorized credit workarounds.
-
-## Phase 1 Scope
-
-- Chat with Heather persona, conversation persistence, search, and title generation.
-- Voice controls with browser speech recognition/TTS where available.
-- Project memory seeded with the requested examples.
-- Personal memory CRUD with archive/delete controls.
-- Pinta-inspired learning architecture with teaching records and generative tool routing.
-- Jarvis-inspired automation recipes with web-executable actions, desktop-only action planning, and browser TTS.
-- Project summary generation.
-- Person/organization analysis in the requested structure.
-- Daily briefing from current conversations, projects, and memories.
-- Settings for tone, voice, memory behavior, confirmations, and destructive data deletion.
-- PWA manifest, icon placeholder, and service worker cache shell.
-
-## Desktop Expansion
-
-Desktop-only operations are available through `PlatformAdapter` interfaces but are marked unavailable in the web adapter. Tauri/Electron can later implement local file access, app launch, clipboard, screen capture, double-clap detection, and wake-word behavior without changing the core assistant logic.
-
-## Teaching Heather
-
-The `학습/생성` panel lets you teach Heather directives, preferences, examples, corrections, skills, and boundary rules. Those records are stored locally and applied to local-only responses, local-model responses, and cloud-provider prompts.
-
-Use `Jarvis 루틴` for repeatable assistant actions, and use `학습/생성` to teach Heather preferred behavior after a routine succeeds or fails.
-
-See `docs/pinta-inspired-heather-learning.md` and `docs/jarvis-inspired-heather-automation.md` for architecture notes.
+A push to the connected GitHub repository should trigger Vercel automatically if the project is already linked in Vercel.
