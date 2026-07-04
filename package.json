@@ -2,12 +2,12 @@
   "name": "heather-ai-assistant",
   "version": "1.0.0",
   "private": true,
-  "description": "Heather AI Assistant / 헤더 web-first personal AI assistant MVP.",
+  "description": "Heather web-first personal AI assistant MVP.",
   "scripts": {
-    "dev": "cd apps/web && npm run dev",
-    "build": "cd apps/web && npm run build",
-    "lint": "cd apps/web && npm run lint",
-    "typecheck": "cd apps/web && npm run typecheck"
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20"
