@@ -1,6 +1,6 @@
 {
   "name": "@heather/web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,10 +9,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@heather/ai": "0.1.0",
-    "@heather/core": "0.1.0",
-    "@heather/db": "0.1.0",
-    "@heather/platform": "0.1.0",
     "lucide-react": "^0.468.0",
     "next": "^14.2.5",
     "react": "^18.3.1",
