@@ -1,29 +1,18 @@
 {
   "name": "heather-ai-assistant",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Heather AI Assistant monorepo for a modular personal assistant web app and future desktop shell.",
+  "description": "Heather AI Assistant / 헤더 web-first personal AI assistant MVP.",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "dev": "npm run dev -w @heather/web",
     "build": "npm run build -w @heather/web",
-    "build:tauri-web": "npm run build && node scripts/build-tauri-web.mjs",
     "lint": "npm run lint -w @heather/web",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "tauri:dev": "npx tauri dev",
-    "tauri:build": "npx tauri build",
-    "tauri:info": "npx tauri info"
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
-    "node": "24.x"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.11.3"
-  },
-  "dependencies": {
-    "@tauri-apps/api": "^2.11.1"
+    "node": ">=20"
   }
 }
