@@ -34,7 +34,7 @@ export type DirectCommandStore = {
   updateDirectCommand(id: string, input: Partial<DirectCommandInput>): Promise<DirectCommand>;
   deleteDirectCommand(id: string): Promise<void>;
   enableDirectCommand(id: string): Promise<DirectCommand>;
-  disableDirectCommand(id: string): Promise<DirectCommand>;
+  disableDirectCommand(id): Promise<DirectCommand>;
   incrementDirectCommandUsage(id: string): Promise<void>;
   importDirectCommands(commands: DirectCommandInput[], mode: ImportMode): Promise<DirectCommand[]>;
   exportDirectCommands(): Promise<DirectCommand[]>;
@@ -56,6 +56,8 @@ type DbDirectCommand = {
 };
 
 const LOCAL_STORAGE_KEY = "heather.directCommands.v1";
+const PAGE_SIZE = 1000;
+const INSERT_BATCH_SIZE = 500;
 
 export function createDirectCommandStore(): DirectCommandStore {
   if (isSupabaseConfigured()) return createSupabaseDirectCommandStore();
@@ -90,27 +92,45 @@ function createSupabaseDirectCommandStore(): DirectCommandStore {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return createLocalDirectCommandStore();
 
-  return {
-    isConfigured: true,
-    async getAllDirectCommands() {
+  async function fetchAllRows() {
+    const rows: DbDirectCommand[] = [];
+    let page = 0;
+
+    while (true) {
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
       const { data, error } = await supabase
         .from("direct_commands")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
       if (error) throw error;
-      return (data || []).map(fromDb);
+      const chunk = (data || []) as DbDirectCommand[];
+      rows.push(...chunk);
+      if (chunk.length < PAGE_SIZE) break;
+      page += 1;
+    }
+
+    return rows;
+  }
+
+  return {
+    isConfigured: true,
+    async getAllDirectCommands() {
+      return (await fetchAllRows()).map(fromDb);
     },
     async createDirectCommand(input) {
       const payload = toDbInsert(input);
       const { data, error } = await supabase.from("direct_commands").insert(payload).select("*").single();
       if (error) throw error;
-      return fromDb(data);
+      return fromDb(data as DbDirectCommand);
     },
     async updateDirectCommand(id, input) {
       const payload = toDbUpdate(input);
       const { data, error } = await supabase.from("direct_commands").update(payload).eq("id", id).select("*").single();
       if (error) throw error;
-      return fromDb(data);
+      return fromDb(data as DbDirectCommand);
     },
     async deleteDirectCommand(id) {
       const { error } = await supabase.from("direct_commands").delete().eq("id", id);
@@ -124,15 +144,15 @@ function createSupabaseDirectCommandStore(): DirectCommandStore {
     },
     async incrementDirectCommandUsage(id) {
       const { error } = await supabase.rpc("increment_direct_command_usage", { command_id: id });
-      if (error) {
-        const commands = await this.getAllDirectCommands();
-        const current = commands.find((command) => command.id === id);
-        if (current) {
-          await supabase
-            .from("direct_commands")
-            .update({ usage_count: current.usageCount + 1, last_used_at: new Date().toISOString() })
-            .eq("id", id);
-        }
+      if (!error) return;
+
+      const commands = await this.getAllDirectCommands();
+      const current = commands.find((command) => command.id === id);
+      if (current) {
+        await supabase
+          .from("direct_commands")
+          .update({ usage_count: current.usageCount + 1, last_used_at: new Date().toISOString() })
+          .eq("id", id);
       }
     },
     async importDirectCommands(commands, mode) {
@@ -143,14 +163,22 @@ function createSupabaseDirectCommandStore(): DirectCommandStore {
 
       const existing = await this.getAllDirectCommands();
       const existingNormalized = new Set(existing.map((command) => command.normalizedQuestion));
-      const created: DirectCommand[] = [];
+      const payloads = commands
+        .filter((command) => {
+          const normalized = normalizeDirectCommandText(command.question);
+          if (!normalized) return false;
+          if (mode === "skip_duplicates" && existingNormalized.has(normalized)) return false;
+          existingNormalized.add(normalized);
+          return true;
+        })
+        .map(toDbInsert);
 
-      for (const command of commands) {
-        const normalized = normalizeDirectCommandText(command.question);
-        if (mode === "skip_duplicates" && existingNormalized.has(normalized)) continue;
-        const inserted = await this.createDirectCommand(command);
-        existingNormalized.add(inserted.normalizedQuestion);
-        created.push(inserted);
+      const created: DirectCommand[] = [];
+      for (let index = 0; index < payloads.length; index += INSERT_BATCH_SIZE) {
+        const batch = payloads.slice(index, index + INSERT_BATCH_SIZE);
+        const { data, error } = await supabase.from("direct_commands").insert(batch).select("*");
+        if (error) throw error;
+        created.push(...((data || []) as DbDirectCommand[]).map(fromDb));
       }
 
       return created;
