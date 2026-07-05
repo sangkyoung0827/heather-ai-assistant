@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  findDirectCommandMatch,
+  formatMatchMetadata,
+  normalizeDirectCommandText
+} from "../lib/direct-command-matching";
 
 type View = "dashboard" | "chat" | "memory" | "directCommands";
-type ChatRoute = "direct_command" | "api";
 
 type DirectCommand = {
   id: string;
@@ -17,16 +21,13 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  route?: ChatRoute;
-  provider?: string;
-  model?: string;
+  metadata?: string;
 };
 
 type DirectCommandDraft = Omit<DirectCommand, "id">;
 
 type ApiResponse = {
   message?: string;
-  route?: ChatRoute;
   provider?: string;
   model?: string;
   error?: string;
@@ -75,7 +76,9 @@ function loadDirectCommands(): DirectCommand[] {
 }
 
 function saveDirectCommands(commands: DirectCommand[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(commands));
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(commands));
+  }
 }
 
 export default function HomePage() {
@@ -89,10 +92,8 @@ export default function HomePage() {
     {
       id: "welcome",
       role: "assistant",
-      content: "직접명령을 등록한 뒤 채팅에서 정확히 같은 문장을 보내면 저장된 답변을 그대로 반환합니다.",
-      route: "api",
-      provider: "mock",
-      model: "mock-fallback"
+      content: "직접명령을 등록한 뒤 채팅에서 같은 의미의 문장을 보내면 저장된 답변을 그대로 반환합니다.",
+      metadata: "api"
     }
   ]);
 
@@ -101,9 +102,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      saveDirectCommands(commands);
-    }
+    saveDirectCommands(commands);
   }, [commands]);
 
   const enabledCommandCount = useMemo(() => commands.filter((command) => command.enabled).length, [commands]);
@@ -167,23 +166,18 @@ export default function HomePage() {
     if (!question || sending) return;
 
     setChatInput("");
-    const userMessage: Message = { id: createId(), role: "user", content: question };
-    setMessages((current) => [...current, userMessage]);
+    setMessages((current) => [...current, { id: createId(), role: "user", content: question }]);
 
-    const directCommand = commands.find(
-      (command) => command.enabled && command.question.trim() === question
-    );
+    const directCommandMatch = findDirectCommandMatch(question, commands);
 
-    if (directCommand) {
+    if (directCommandMatch) {
       setMessages((current) => [
         ...current,
         {
           id: createId(),
           role: "assistant",
-          content: directCommand.response,
-          route: "direct_command",
-          provider: "none",
-          model: "none"
+          content: directCommandMatch.command.response,
+          metadata: formatMatchMetadata(directCommandMatch)
         }
       ]);
       return;
@@ -204,9 +198,7 @@ export default function HomePage() {
           id: createId(),
           role: "assistant",
           content: data.message || data.error || "등록된 직접명령이 없어 API 응답으로 처리해야 합니다.",
-          route: "api",
-          provider: data.provider || "mock",
-          model: data.model || "mock-fallback"
+          metadata: "api"
         }
       ]);
     } catch {
@@ -216,9 +208,7 @@ export default function HomePage() {
           id: createId(),
           role: "assistant",
           content: "등록된 직접명령이 없어 API 응답으로 처리해야 합니다.",
-          route: "api",
-          provider: "mock",
-          model: "mock-fallback"
+          metadata: "api"
         }
       ]);
     } finally {
@@ -337,11 +327,8 @@ function ChatView({
             }`}
           >
             <p className="whitespace-pre-wrap text-sm leading-6 text-white">{message.content}</p>
-            {message.role === "assistant" && message.route && (
-              <p className="mt-2 text-xs text-slate-500">
-                route: {message.route}
-                {message.route === "api" ? ` · provider: ${message.provider} · model: ${message.model}` : ""}
-              </p>
+            {message.role === "assistant" && message.metadata && (
+              <p className="mt-2 text-xs text-slate-500">{message.metadata}</p>
             )}
           </article>
         ))}
@@ -402,6 +389,9 @@ function DirectCommandsView({
     <div>
       <p className="text-sm font-semibold text-cyan-200">직접명령등록</p>
       <h2 className="mt-2 text-3xl font-bold text-white">Direct Commands</h2>
+      <p className="mt-3 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-3 text-sm text-cyan-100">
+        띄어쓰기, 간단한 문장부호, 호출어 차이는 자동으로 보정됩니다.
+      </p>
 
       <form onSubmit={onSubmit} className="mt-6 rounded-2xl border border-slate-800 bg-slate-950 p-4">
         <div className="grid gap-3 md:grid-cols-2">
@@ -428,6 +418,9 @@ function DirectCommandsView({
             className="min-h-20 w-full resize-none rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300"
           />
         </Field>
+        <p className="mt-2 break-all rounded-xl bg-slate-900 p-3 text-xs text-slate-500">
+          normalized preview: {normalizeDirectCommandText(commandDraft.question) || "-"}
+        </p>
         <Field label="response">
           <textarea
             value={commandDraft.response}
@@ -465,6 +458,9 @@ function DirectCommandsView({
                 </div>
                 <p className="mt-3 text-xs text-slate-500">question</p>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-slate-200">{command.question}</p>
+                <p className="mt-2 break-all text-xs text-slate-500">
+                  normalized: {normalizeDirectCommandText(command.question) || "-"}
+                </p>
                 <p className="mt-3 text-xs text-slate-500">response</p>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-slate-200">{command.response}</p>
               </div>
@@ -487,7 +483,7 @@ function DirectCommandsView({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="mt-3 block text-sm text-slate-300">
       <span className="mb-1 block text-xs font-semibold text-slate-500">{label}</span>
