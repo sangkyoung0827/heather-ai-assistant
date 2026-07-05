@@ -34,7 +34,7 @@ export type DirectCommandStore = {
   updateDirectCommand(id: string, input: Partial<DirectCommandInput>): Promise<DirectCommand>;
   deleteDirectCommand(id: string): Promise<void>;
   enableDirectCommand(id: string): Promise<DirectCommand>;
-  disableDirectCommand(id): Promise<DirectCommand>;
+  disableDirectCommand(id: string): Promise<DirectCommand>;
   incrementDirectCommandUsage(id: string): Promise<void>;
   importDirectCommands(commands: DirectCommandInput[], mode: ImportMode): Promise<DirectCommand[]>;
   exportDirectCommands(): Promise<DirectCommand[]>;
