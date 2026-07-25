@@ -9,6 +9,8 @@ import type {
 
 export function createDefaultSettings(): HeatherSettings {
   return {
+    accentColor: "violet",
+    iconStyle: "avatar",
     tone: "analytical",
     aiMode: "local_model",
     ollamaBaseUrl: "http://localhost:11434",

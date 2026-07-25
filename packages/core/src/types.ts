@@ -262,6 +262,8 @@ export interface ActionLogRecord {
 }
 
 export interface HeatherSettings {
+  accentColor: "violet" | "blue" | "cyan" | "emerald" | "amber" | "slate";
+  iconStyle: "avatar" | "orb" | "spark" | "neural";
   tone: HeatherTone;
   aiMode: HeatherAIMode;
   ollamaBaseUrl: string;

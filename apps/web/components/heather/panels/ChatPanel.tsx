@@ -32,6 +32,7 @@ import type {
 } from "@heather/core";
 import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
 import type { DesktopActionResult, MediaActionResult } from "@heather/platform";
+import { HeatherAvatar } from "../HeatherAvatar";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -566,7 +567,7 @@ export function ChatPanel({
             ))
           ) : (
             <div className="chat-welcome">
-              <div className="chat-welcome-icon"><MessageSquare className="h-6 w-6" /></div>
+              <div className="chat-welcome-icon"><HeatherAvatar settings={settings} size="medium" /></div>
               <h2>안녕하세요, 저는 Heather예요.</h2><p>무엇을 도와드릴까요?</p>
               <div className="chat-suggestions">
                 {[["프로젝트 계획 수립", "새 프로젝트의 다음 단계를 정리해줘"], ["문서 요약하기", "이 문서의 핵심 내용을 요약해줘"], ["아이디어 정리", "이 아이디어를 실행 가능한 항목으로 정리해줘"]].map(([label, prompt]) => <button key={label} type="button" onClick={() => setDraft(prompt)}>{label}<span>›</span></button>)}
