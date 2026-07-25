@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
+  MessageSquare,
   MessageSquarePlus,
   Mic,
   MicOff,
@@ -440,7 +441,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-10rem)] gap-4 lg:grid-cols-[320px_1fr]">
+    <div className="grid min-h-[calc(100vh-10rem)] gap-4 md:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="flex min-h-0 flex-col rounded-lg border border-line bg-slate-50">
         <div className="border-b border-line p-3">
           <div className="flex items-center gap-2">
@@ -516,12 +517,9 @@ export function ChatPanel({
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div className="min-w-0">
             <h3 className="truncate font-semibold">{activeConversation?.title || "새 대화"}</h3>
-            <p className="text-sm text-slate-500">{providerStatus}</p>
+            <p className="text-sm text-slate-500">Heather와 대화하며 작업을 이어가세요.</p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Volume2 className="h-4 w-4 text-heather-700" />
-            <span>{settings.voiceOutputEnabled ? "TTS on" : "TTS off"}</span>
-          </div>
+          <Volume2 className="h-4 w-4 text-heather-700" aria-label="음성 읽기 지원" />
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 heather-scrollbar">
@@ -545,24 +543,8 @@ export function ChatPanel({
                     }`}
                   >
                     {message.role === "assistant" ? (
-                      <>
-                        <span>{formatAssistantMetadata(message)}</span>
-                        <span>
-                          {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
-                            hour: "2-digit",
-                            minute: "2-digit"
-                          })}
-                        </span>
-                      </>
-                    ) : (
-                      <span>
-                        {message.source === "voice" ? "voice" : "text"} ·{" "}
-                        {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        })}
-                      </span>
-                    )}
+                      <span>{new Date(message.createdAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>
+                    ) : <span>{new Date(message.createdAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>}
                     {message.role === "assistant" ? (
                       <button
                         type="button"
@@ -588,12 +570,7 @@ export function ChatPanel({
             ))
           ) : (
             <div className="flex h-full min-h-[360px] items-center justify-center text-center">
-              <div>
-                <p className="font-semibold">헤더라고 부르면 시작할게요.</p>
-                <p className="mt-2 text-sm text-slate-500">
-                  프로젝트, 일정, 인간관계 분석, 문서 초안, 오늘의 우선순위를 물어보세요.
-                </p>
-              </div>
+              <div className="max-w-md"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-heather-50 text-heather-700"><MessageSquare className="h-6 w-6" /></div><p className="mt-5 font-semibold">안녕하세요, 저는 Heather예요.</p><p className="mt-2 text-sm text-slate-500">무엇을 도와드릴까요?</p><div className="mt-5 grid gap-2 text-left text-sm text-slate-600 sm:grid-cols-3"><span className="rounded-lg border border-line bg-white p-3">프로젝트 계획 수립</span><span className="rounded-lg border border-line bg-white p-3">문서 요약</span><span className="rounded-lg border border-line bg-white p-3">아이디어 정리</span></div></div>
             </div>
           )}
           {isSending && (
@@ -680,10 +657,6 @@ function formatProviderStatus(data: ApiChatResponse): string {
   }
 
   return "로컬 Heather 응답";
-}
-
-function formatAssistantMetadata(message: Conversation["messages"][number]): string {
-  return [message.provider, message.model].filter(Boolean).join(" · ") || "assistant";
 }
 
 function incrementPaidApiCount(settings: HeatherSettings): HeatherSettings {

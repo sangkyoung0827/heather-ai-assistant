@@ -1,5 +1,5 @@
-import { HeatherWorkspace } from "../components/heather/HeatherWorkspace";
+import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  return <HeatherWorkspace />;
+  redirect("/dashboard");
 }

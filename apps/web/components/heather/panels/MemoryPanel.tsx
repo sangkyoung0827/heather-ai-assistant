@@ -6,6 +6,7 @@ import { createId, nowIso } from "@heather/core";
 import type { MemoryRecord, MemoryType } from "@heather/core";
 
 interface MemoryPanelProps {
+  variant?: "personal" | "research";
   memories: MemoryRecord[];
   onSaveMemory: (memory: MemoryRecord) => Promise<void>;
   onDeleteMemory: (id: string) => Promise<void>;
@@ -21,11 +22,21 @@ const MEMORY_TYPES: MemoryType[] = [
   "important_fact"
 ];
 
-export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPanelProps) {
+export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDeleteMemory }: MemoryPanelProps) {
   const [showArchived, setShowArchived] = useState(false);
+  const [search, setSearch] = useState("");
+  const isResearch = variant === "research";
+  const title = isResearch ? "연구 메모리" : "개인 메모리";
+  const description = isResearch ? "연구 맥락, 실험 기록과 후속 조치를 관리하세요." : "Heather가 장기적으로 참고할 개인 맥락과 결정을 관리하세요.";
   const visibleMemories = useMemo(
-    () => memories.filter((memory) => showArchived || !memory.archived),
-    [memories, showArchived]
+    () => memories.filter((memory) => {
+      const matchesVariant = isResearch ? memory.type === "project_context" || memory.source.startsWith("research") : memory.type !== "project_context" && !memory.source.startsWith("research");
+      const matchesArchive = showArchived || !memory.archived;
+      const keyword = search.trim().toLowerCase();
+      const matchesSearch = !keyword || `${memory.source} ${memory.content} ${memory.tags.join(" ")}`.toLowerCase().includes(keyword);
+      return matchesVariant && matchesArchive && matchesSearch;
+    }),
+    [isResearch, memories, search, showArchived]
   );
   const [selectedId, setSelectedId] = useState<string | null>(visibleMemories[0]?.id || null);
   const selectedMemory = useMemo(
@@ -48,9 +59,9 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
     const timestamp = nowIso();
     const memory: MemoryRecord = {
       id: createId("memory"),
-      type: "important_fact",
+      type: isResearch ? "project_context" : "important_fact",
       content: "",
-      source: "manual",
+      source: isResearch ? "research" : "personal",
       confidence: 0.7,
       tags: [],
       created_at: timestamp,
@@ -92,7 +103,7 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
         <div className="flex items-center justify-between border-b border-line p-3">
           <div className="flex items-center gap-2 font-semibold">
             <Database className="h-4 w-4 text-heather-700" />
-            장기 기억
+            {title}
           </div>
           <div className="flex gap-2">
             <button
@@ -117,6 +128,7 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
             </button>
           </div>
         </div>
+        <div className="border-b border-line p-3"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`${title} 검색`} className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm" /></div>
         <div className="max-h-[680px] space-y-2 overflow-y-auto p-3 heather-scrollbar">
           {visibleMemories.length ? (
             visibleMemories.map((memory) => (
@@ -140,7 +152,7 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
               </button>
             ))
           ) : (
-            <p className="p-4 text-sm text-slate-500">표시할 기억이 없습니다.</p>
+            <div className="p-5 text-sm text-slate-500"><p className="font-semibold text-ink">아직 저장된 {title}가 없습니다.</p><p className="mt-2">{isResearch ? "연구 맥락과 기록을 저장하세요." : "Heather가 기억해야 할 개인 정보와 결정사항을 저장하세요."}</p></div>
           )}
         </div>
       </aside>
@@ -155,8 +167,8 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-sm font-semibold text-heather-700">Personal Memory</p>
-              <h3 className="text-2xl font-semibold">헤더가 기억할 내용</h3>
+              <p className="text-sm font-semibold text-heather-700">{isResearch ? "Research Memory" : "Personal Memory"}</p>
+              <h3 className="text-2xl font-semibold">{title} 등록 / 편집</h3>
             </div>
             <div className="flex gap-2">
               <button
@@ -205,7 +217,7 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
             </label>
 
             <label className="block">
-              <span className="text-sm font-medium">출처</span>
+              <span className="text-sm font-medium">{isResearch ? "연구 또는 프로젝트명" : "제목 또는 출처"}</span>
               <input
                 value={draft.source}
                 onChange={(event) => setDraft({ ...draft, source: event.target.value })}
@@ -220,7 +232,7 @@ export function MemoryPanel({ memories, onSaveMemory, onDeleteMemory }: MemoryPa
               value={draft.content}
               onChange={(event) => setDraft({ ...draft, content: event.target.value })}
               className="mt-1 min-h-36 w-full resize-y rounded-lg border border-line px-3 py-2 leading-6"
-              placeholder="헤더가 장기적으로 참고해야 할 사실, 선호, 규칙을 적으세요."
+              placeholder={isResearch ? "연구 기록, 핵심 데이터, 결과와 다음 실험을 적으세요." : "Heather가 장기적으로 참고해야 할 사실, 선호, 규칙을 적으세요."}
             />
           </label>
 
