@@ -208,6 +208,7 @@ export function ChatPanel({
     try {
       const payload: ChatRequestPayload = {
         message,
+        messageId: userMessage.id,
         conversation: optimisticConversation,
         settings,
         memories,

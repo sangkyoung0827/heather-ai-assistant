@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ChatRequestPayload } from "@heather/core";
-import { isAutoPromotionEligible } from "../../../../lib/intent/direct-command-engine";
 import { DirectCommandRepository } from "../../../../lib/intent/direct-command-repository";
+import { RepeatedQueryLearningService } from "../../../../lib/intent/repeated-query-learning";
 
 export const runtime = "nodejs";
 
@@ -33,7 +33,8 @@ export async function POST(request: Request) {
     const fallback = await fallbackResponse.json() as { message?: string; error?: string; [key: string]: unknown };
     if (!fallbackResponse.ok || !fallback.message) return NextResponse.json(fallback, { status: fallbackResponse.status || 502 });
 
-    await repository.recordFallback(payload.message, fallback.message, isAutoPromotionEligible(payload.message, fallback.message));
+    // Learning is best-effort post-processing; it must never delay or fail the user's answer.
+    await new RepeatedQueryLearningService(repository).recordSuccessfulFallback({ message: payload.message, response: fallback.message, messageId: payload.messageId }).catch(() => undefined);
     await repository.logIntent("fallback", payload.message);
     return NextResponse.json({ ...fallback, result: "fallback" });
   } catch (error) {

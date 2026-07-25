@@ -48,7 +48,7 @@ export function DirectCommandRegistrationPanel() {
       <div className="direct-list-heading"><span>등록된 직접명령</span><span>{commands.length}</span></div>
       <div className="direct-command-list heather-scrollbar">
         {commands.length === 0 ? <div className="workspace-empty"><strong>아직 등록된 직접명령이 없습니다.</strong><p>반복해서 사용하는 질문과 응답을 등록해보세요.</p></div> : commands.map((command) => <article key={command.id} className={`direct-command-row ${editingId === command.id ? "is-selected" : ""}`}>
-          <button type="button" className="direct-command-select" onClick={() => edit(command)}><span className="direct-command-title">{command.title}</span><span className="direct-command-trigger">{command.canonicalTrigger}</span></button>
+          <button type="button" className="direct-command-select" onClick={() => edit(command)}><span className="direct-command-title">{command.title}{command.createdBy === "auto" && <em className="auto-command-badge">자동 생성</em>}</span><span className="direct-command-trigger">{command.canonicalTrigger}</span></button>
           <div className="direct-command-actions"><button type="button" onClick={() => void toggle(command)} className={`command-state ${command.enabled ? "is-enabled" : ""}`}>{command.enabled ? "활성" : "비활성"}</button><button type="button" onClick={() => edit(command)} className="workspace-icon-button" title="수정" aria-label="수정"><Pencil className="h-4 w-4" /></button><button type="button" onClick={() => void remove(command)} className="workspace-icon-button is-danger" title="삭제" aria-label="삭제"><Trash2 className="h-4 w-4" /></button></div>
         </article>)}
       </div>

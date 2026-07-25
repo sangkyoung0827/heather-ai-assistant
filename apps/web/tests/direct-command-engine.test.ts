@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { findIntentCommandMatch, isAutoPromotionEligible, normalizeIntentText } from "../lib/intent/direct-command-engine";
 import { DirectCommandRepository } from "../lib/intent/direct-command-repository";
+import { RepeatedQueryLearningService } from "../lib/intent/repeated-query-learning";
 
 const command = { id: "one", canonicalTrigger: "이번 주 프로젝트 진행 상태를 알려줘", triggers: ["프로젝트 진행 상황 알려줘"], response: "고정 응답", enabled: true };
 
@@ -30,4 +31,29 @@ test("three successful repeated safe prompts promote one server command", async 
   const promoted = await repository.recordFallback(message, response, true);
   assert.equal(promoted.promoted, true);
   if (promoted.command) await repository.remove(promoted.command.id);
+});
+
+test("repeated-query learning promotes only a stable, safe fallback response", async () => {
+  const repository = new DirectCommandRepository();
+  const learning = new RepeatedQueryLearningService(repository);
+  const message = `고정 기능 안내를 설명해줘 ${Date.now()}`;
+  const response = "이 기능은 반복 작업에 사용할 수 있는 고정 안내를 제공합니다.";
+  await learning.recordSuccessfulFallback({ message, response, messageId: "repeat-one" });
+  await learning.recordSuccessfulFallback({ message: `${message}!`, response, messageId: "repeat-two" });
+  await learning.recordSuccessfulFallback({ message: ` ${message} `, response, messageId: "repeat-three" });
+  const created = (await repository.list()).find((item) => item.response === response);
+  assert.ok(created);
+  if (created) await repository.remove(created.id);
+});
+
+test("dynamic and inconsistent responses never auto-promote", async () => {
+  const repository = new DirectCommandRepository();
+  const learning = new RepeatedQueryLearningService(repository);
+  await Promise.all(["one", "two", "three"].map((messageId) => learning.recordSuccessfulFallback({ message: "오늘 날씨 알려줘", response: "맑습니다.", messageId })));
+  assert.equal((await repository.find("오늘 날씨 알려줘")), null);
+  const question = `응답 일관성 테스트 ${Date.now()}`;
+  await learning.recordSuccessfulFallback({ message: question, response: "첫 번째 답변입니다.", messageId: "inconsistent-one" });
+  await learning.recordSuccessfulFallback({ message: question, response: "완전히 다른 두 번째 답변입니다.", messageId: "inconsistent-two" });
+  await learning.recordSuccessfulFallback({ message: question, response: "세 번째 답변도 다릅니다.", messageId: "inconsistent-three" });
+  assert.equal((await repository.find(question)), null);
 });

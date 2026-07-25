@@ -327,6 +327,7 @@ export interface SafetyRisk {
 
 export interface ChatRequestPayload {
   message: string;
+  messageId?: string;
   conversation?: Conversation;
   settings: HeatherSettings;
   memories: MemoryRecord[];

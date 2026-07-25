@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { findIntentCommandMatch, normalizeIntentText, type IntentCommand } from "./direct-command-engine";
 import { previewBulkImport } from "./bulk-direct-command-import";
+import { AUTO_LEARNING_WINDOW_DAYS, AUTO_PROMOTION_COUNT, MAX_QUERY_VARIANTS, REPEATED_QUERY_SIMILARITY_THRESHOLD, RESPONSE_CONSISTENCY_THRESHOLD } from "./repeated-query-learning";
 
 export type CommandCreatedBy = "user" | "auto";
 export type DirectCommandRecord = IntentCommand & {
@@ -27,15 +28,15 @@ export type ImportSummary = { created: number; merged: number; skipped: number; 
 export type BulkCommitSummary = { created: number; merged: number; duplicate: number; error: number };
 export type StorageStatus = { provider: "supabase" | "local" | "unavailable"; connected: boolean; readable: boolean; writable: boolean };
 
-type QueryPattern = { normalized: string; examples: string[]; count: number; response: string };
-type MemoryState = { commands: DirectCommandRecord[]; patterns: Map<string, QueryPattern> };
+type QueryPattern = { id?: string; normalized: string; examples: string[]; count: number; response: string; status?: string; lastSeenAt?: string };
+type MemoryState = { commands: DirectCommandRecord[]; patterns: Map<string, QueryPattern>; processedMessageIds: Set<string> };
 
 declare global {
   // eslint-disable-next-line no-var
   var heatherIntentMemory: MemoryState | undefined;
 }
 
-const memory = globalThis.heatherIntentMemory ?? { commands: [], patterns: new Map<string, QueryPattern>() };
+const memory = globalThis.heatherIntentMemory ?? { commands: [], patterns: new Map<string, QueryPattern>(), processedMessageIds: new Set<string>() };
 globalThis.heatherIntentMemory = memory;
 
 const MAX_TITLE_LENGTH = 200;
@@ -184,30 +185,50 @@ export class DirectCommandRepository {
     return (await this.list()).map(({ title, canonicalTrigger, triggers, response, enabled, tags }) => ({ title, canonicalTrigger, triggers, response, enabled, tags }));
   }
 
-  async recordFallback(message: string, response: string, eligible: boolean) {
-    if (!eligible) return { promoted: false };
-    const normalized = normalizeIntentText(message);
+  async recordRepeatedFallback({ message, response, messageId }: { message: string; response: string; messageId?: string }) {
+    if (messageId && memory.processedMessageIds.has(messageId)) return { promoted: false };
+    if (messageId) { memory.processedMessageIds.add(messageId); if (memory.processedMessageIds.size > 1000) memory.processedMessageIds.delete(memory.processedMessageIds.values().next().value as string); }
+    const normalized = normalizeRepeatedQuery(message);
     if (!normalized) return { promoted: false };
-    const persisted = this.client
-      ? await this.client.from("query_patterns").select("occurrence_count, examples, status").eq("normalized_query", normalized).maybeSingle()
-      : null;
+    const cutoff = new Date(Date.now() - AUTO_LEARNING_WINDOW_DAYS * 86400000).toISOString();
+    const persisted = this.client ? await this.client.from("query_patterns").select("id, normalized_query, representative_query, examples, occurrence_count, latest_response, status, updated_at").gte("updated_at", cutoff).limit(250) : null;
     if (persisted?.error) throw persisted.error;
-    const persistedRow = persisted?.data as { occurrence_count: number; examples: string[]; status: string } | null | undefined;
-    const pattern = memory.patterns.get(normalized) ?? { normalized, examples: persistedRow?.examples || [], count: persistedRow?.occurrence_count || 0, response };
-    pattern.count += 1;
+    const rows = ((persisted?.data || []) as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), normalized: String(row.normalized_query), examples: Array.isArray(row.examples) ? row.examples.map(String) : [], count: Number(row.occurrence_count || 0), response: String(row.latest_response || ""), status: String(row.status || "observed"), lastSeenAt: String(row.updated_at || "") }));
+    const candidate = rows.find((pattern) => pattern.normalized === normalized) || rows.filter((pattern) => pattern.status === "observed").map((pattern) => ({ pattern, score: repeatedQuerySimilarity(normalized, pattern.normalized) })).filter(({ score }) => score >= REPEATED_QUERY_SIMILARITY_THRESHOLD).sort((a, b) => b.score - a.score)[0]?.pattern;
+    const pattern = candidate || memory.patterns.get(normalized) || { normalized, examples: [], count: 0, response: "", status: "observed" };
+    if (pattern.status === "promoted" || pattern.status === "excluded" || pattern.status === "ignored") return { promoted: false };
+    const consistent = !pattern.response || responseSimilarity(pattern.response, response) >= RESPONSE_CONSISTENCY_THRESHOLD;
+    pattern.count = consistent ? pattern.count + 1 : 1;
     pattern.response = response;
     if (!pattern.examples.includes(message)) pattern.examples.push(message);
-    memory.patterns.set(normalized, pattern);
+    pattern.examples = pattern.examples.slice(-MAX_QUERY_VARIANTS);
+    pattern.lastSeenAt = new Date().toISOString();
+    memory.patterns.set(pattern.normalized, pattern);
     if (this.client) {
-      const { error } = await this.client.from("query_patterns").upsert({ normalized_query: normalized, representative_query: pattern.examples[0] || message, examples: pattern.examples.slice(0, MAX_TRIGGERS + 1), occurrence_count: pattern.count, latest_response: response, status: pattern.count >= 3 ? "promoted" : "observed" }, { onConflict: "normalized_query" });
+      const payload = { normalized_query: pattern.normalized, representative_query: pattern.examples[0] || message, examples: pattern.examples, occurrence_count: pattern.count, latest_response: response, status: "observed" };
+      const query = pattern.id ? this.client.from("query_patterns").update(payload).eq("id", pattern.id) : this.client.from("query_patterns").upsert(payload, { onConflict: "normalized_query" });
+      const { error } = await query;
       if (error) throw error;
     }
-    if (pattern.count < 3) return { promoted: false };
-    const existing = await this.find(message);
-    if (existing) return { promoted: false };
-    const created = await this.create({ title: truncate(message, 64), canonicalTrigger: pattern.examples[0] || message, triggers: pattern.examples.slice(1), response, enabled: true, tags: ["auto"] }, "auto");
+    if (pattern.count < AUTO_PROMOTION_COUNT) return { promoted: false };
+    const existing = await this.find(pattern.examples[0] || message);
+    if (existing) {
+      const existingRecord = (await this.list()).find((command) => command.id === existing.command.id);
+      if (!existingRecord || responseSimilarity(existing.command.response, response) < RESPONSE_CONSISTENCY_THRESHOLD) return this.excludePattern(pattern, "conflict");
+      const triggers = uniqueTriggers(existingRecord.canonicalTrigger, [...existingRecord.triggers, ...pattern.examples]);
+      if (triggers.length > existingRecord.triggers.length) await this.update(existingRecord.id, { triggers });
+      await this.markPattern(pattern, "promoted");
+      return { promoted: false, merged: true };
+    }
+    const created = await this.create({ title: truncate(pattern.examples[0] || message, 64), canonicalTrigger: pattern.examples[0] || message, triggers: uniqueTriggers(pattern.examples[0] || message, pattern.examples.slice(1)), response, enabled: true, tags: ["auto-generated"] }, "auto");
+    await this.markPattern(pattern, "promoted");
     return { promoted: true, command: created };
   }
+
+  async recordFallback(message: string, response: string, eligible: boolean) { if (!eligible) return { promoted: false }; return this.recordRepeatedFallback({ message, response }); }
+
+  private async markPattern(pattern: QueryPattern, status: "promoted" | "excluded") { pattern.status = status; if (!this.client) return; const { error } = pattern.id ? await this.client.from("query_patterns").update({ status }).eq("id", pattern.id) : await this.client.from("query_patterns").update({ status }).eq("normalized_query", pattern.normalized); if (error) throw error; }
+  private async excludePattern(pattern: QueryPattern, _reason: string) { await this.markPattern(pattern, "excluded"); return { promoted: false, excluded: true }; }
 
   async logIntent(result: "direct_command" | "fallback", message: string, commandId?: string) {
     if (!this.client) return;
@@ -258,6 +279,38 @@ function uniqueTriggers(canonicalTrigger: string, triggers: string[]) {
     seen.add(normalized);
     return true;
   }).slice(0, MAX_TRIGGERS);
+}
+
+function normalizeRepeatedQuery(value: string) {
+  return normalizeIntentText(value)
+    .replace(/개발\s*(현황|진행\s*상황|어디까지)/g, "개발 진행")
+    .replace(/\b(current|status|progress)\b/g, "progress")
+    .trim();
+}
+
+function repeatedQuerySimilarity(left: string, right: string) {
+  if (left === right) return 1;
+  const leftTokens = new Set(left.split(" ").filter(Boolean));
+  const rightTokens = new Set(right.split(" ").filter(Boolean));
+  if (!leftTokens.size || !rightTokens.size || hasOpposingMeaning(leftTokens, rightTokens)) return 0;
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  return intersection / union;
+}
+
+function responseSimilarity(left: string, right: string) {
+  const normalize = (value: string) => value.normalize("NFKC").replace(/\s+/g, " ").replace(/(?:provider|model|intent|debug)\s*[:=][^\n]+/gi, "").trim().toLocaleLowerCase();
+  const first = normalize(left); const second = normalize(right);
+  if (first === second) return 1;
+  const longest = Math.max(first.length, second.length);
+  if (!longest) return 0;
+  let same = 0;
+  for (let index = 0; index < Math.min(first.length, second.length); index += 1) if (first[index] === second[index]) same += 1;
+  return same / longest;
+}
+
+function hasOpposingMeaning(left: Set<string>, right: Set<string>) {
+  return [["활성화", "비활성화"], ["삭제", "생성"], ["보내", "취소"], ["enable", "disable"], ["delete", "create"]].some(([first, second]) => (left.has(first) && right.has(second)) || (left.has(second) && right.has(first)));
 }
 
 function truncate(value: string, length: number) { return value.length > length ? `${value.slice(0, length - 1)}…` : value; }
