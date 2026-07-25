@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
   MessageSquarePlus,
@@ -13,7 +13,6 @@ import {
   Volume2
 } from "lucide-react";
 import {
-  createLocalHeatherResponse,
   createConversation,
   createId,
   createMessage,
@@ -32,13 +31,6 @@ import type {
 } from "@heather/core";
 import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
 import type { DesktopActionResult, MediaActionResult } from "@heather/platform";
-import {
-  findDirectCommandMatch,
-  formatMatchMetadata,
-  type DirectCommandMatch
-} from "../../../lib/direct-command-matching";
-import { DIRECT_COMMANDS_CHANGED_EVENT } from "../../../lib/direct-command-events";
-import { createDirectCommandStore, type DirectCommand } from "../../../lib/direct-command-store";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -137,8 +129,6 @@ export function ChatPanel({
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
   const [providerStatus, setProviderStatus] = useState("대기 중");
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
-  const directCommandStore = useMemo(() => createDirectCommandStore(), []);
-  const [directCommands, setDirectCommands] = useState<DirectCommand[]>([]);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseDraftRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -176,16 +166,6 @@ export function ChatPanel({
       stopHeatherSpeech();
     };
   }, []);
-
-  const loadDirectCommands = useCallback(async () => {
-    setDirectCommands(await directCommandStore.getAllDirectCommands());
-  }, [directCommandStore]);
-
-  useEffect(() => {
-    void loadDirectCommands();
-    window.addEventListener(DIRECT_COMMANDS_CHANGED_EVENT, loadDirectCommands);
-    return () => window.removeEventListener(DIRECT_COMMANDS_CHANGED_EVENT, loadDirectCommands);
-  }, [loadDirectCommands]);
 
   async function handleNewConversation() {
     const conversation = createConversation();
@@ -234,10 +214,7 @@ export function ChatPanel({
         teachings,
         automationRecipes
       };
-      const directCommandMatch = findDirectCommandMatch(message, directCommands);
-      const fastResponse = directCommandMatch
-        ? await resolveDirectCommand(directCommandMatch)
-        : await resolveFastCommand(message, baseConversation);
+      const fastResponse = await resolveFastCommand(message, baseConversation);
       if (!fastResponse) {
         setProviderStatus("Ollama 응답 대기 중");
       }
@@ -308,45 +285,8 @@ export function ChatPanel({
     }
   }
 
-  async function resolveDirectCommand(
-    match: DirectCommandMatch<DirectCommand>
-  ): Promise<ApiChatResponse> {
-    await directCommandStore.incrementDirectCommandUsage(match.command.id);
-    void loadDirectCommands();
-    return {
-      message: match.command.response,
-      title: generateConversationTitle(match.command.question),
-      risk: { level: "low", requiresConfirmation: false, reason: "저장된 직접명령 응답입니다." },
-      provider: "direct-command",
-      model: formatMatchMetadata(match)
-    };
-  }
-
   async function resolveHeatherResponse(payload: ChatRequestPayload): Promise<ApiChatResponse> {
-    if (payload.settings.aiMode === "local_only") {
-      return {
-        ...createLocalHeatherResponse(payload),
-        provider: "browser-local"
-      };
-    }
-
-    const providerModelStatusQuestion = asksCurrentProviderOrModel(payload.message);
-    const cached =
-      payload.settings.cacheResponses && !providerModelStatusQuestion
-        ? readCachedResponse(payload)
-        : null;
-    if (cached) {
-      return {
-        ...cached,
-        cached: true
-      };
-    }
-
-    const data = isTauriRuntime()
-      ? await invokeTauriCommand<ApiChatResponse>("ollama_chat", { payload })
-      : await requestHeatherApi(payload);
-
-    return data;
+    return requestIntentApi(payload);
   }
 
   async function resolveFastCommand(
@@ -414,8 +354,8 @@ export function ChatPanel({
     };
   }
 
-  async function requestHeatherApi(payload: ChatRequestPayload): Promise<ApiChatResponse> {
-    const response = await fetch("/api/chat", {
+  async function requestIntentApi(payload: ChatRequestPayload): Promise<ApiChatResponse> {
+    const response = await fetch("/api/intent/resolve", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
