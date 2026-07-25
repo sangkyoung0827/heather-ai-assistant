@@ -218,7 +218,7 @@ export function ChatPanel({
       };
       const fastResponse = await resolveFastCommand(message, baseConversation);
       if (!fastResponse) {
-        setProviderStatus("Ollama 응답 대기 중");
+        setProviderStatus("Heather 응답 대기 중");
       }
       const data = fastResponse || (await resolveHeatherResponse(payload));
 
@@ -638,6 +638,10 @@ export function ChatPanel({
 function formatProviderStatus(data: ApiChatResponse): string {
   if (data.cached) {
     return "로컬 캐시 응답";
+  }
+
+  if (data.provider === "nvidia") {
+    return "Heather 응답 완료";
   }
 
   if (data.provider === "openai") {
