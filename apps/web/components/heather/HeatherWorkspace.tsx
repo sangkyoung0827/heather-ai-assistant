@@ -24,6 +24,7 @@ import { AnalysisPanel } from "./panels/AnalysisPanel";
 import { AutomationPanel } from "./panels/AutomationPanel";
 import { BriefingPanel } from "./panels/BriefingPanel";
 import { ChatPanel } from "./panels/ChatPanel";
+import { DirectCommandRegistrationPanel } from "./panels/DirectCommandRegistrationPanel";
 import { LocalControlPanel } from "./panels/LocalControlPanel";
 import { MemoryPanel } from "./panels/MemoryPanel";
 import { ProjectsPanel } from "./panels/ProjectsPanel";
@@ -36,6 +37,7 @@ export type HeatherView =
   | "projects"
   | "memory"
   | "automation"
+  | "direct_commands"
   | "local_control"
   | "training"
   | "analysis"
@@ -88,7 +90,7 @@ const PRIMARY_NODES: NeuralNode[] = [
     label: "Direct Command Registration",
     detail: "safe local actions",
     icon: Command,
-    view: "automation",
+    view: "direct_commands",
     x: 182,
     y: 302
   },
@@ -174,7 +176,7 @@ function nodeForView(view: HeatherView): NeuralNodeId {
   if (view === "training") return "research_materials";
   if (view === "projects") return "research_records";
   if (view === "analysis") return "researcher";
-  if (view === "automation" || view === "local_control") return "direct";
+  if (view === "automation" || view === "direct_commands" || view === "local_control") return "direct";
   return "dashboard";
 }
 
@@ -388,6 +390,7 @@ export function HeatherWorkspace() {
                     onDeleteRecipe={data.deleteAutomationRecipe}
                   />
                 )}
+                {activeView === "direct_commands" && <DirectCommandRegistrationPanel />}
                 {activeView === "local_control" && (
                   <LocalControlPanel
                     settings={data.settings}

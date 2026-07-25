@@ -1,21 +1,16 @@
 # Heather AI Assistant / 헤더
 
-Heather 1.0 is a clean web-first MVP for a Jarvis-like personal AI assistant.
-
-This rebuild intentionally abandons the tangled older implementation path. Git history is preserved, but the active app surface is now a simple deployable Next.js web app with no desktop/Tauri runtime dependency.
+Heather is a web-first personal AI workspace. The canonical application lives in
+`apps/web`; the repository root is only the npm-workspace and Vercel build entry
+point.
 
 ## Current scope
 
-- Main dashboard
-- Chat panel
-- Left sidebar
-- Web Mode badge
-- Action Log panel
-- Projects placeholder
-- Memory placeholder
-- Settings placeholder
-- Dark Jarvis-inspired UI
-- API route at `/api/chat`
+- Dashboard, Chat, Memory, and Researcher workspaces
+- Direct Command Registration: create, edit, delete, search, enable/disable,
+  JSON import/export, localStorage migration, direct-match priority, and API fallback
+- Local Ollama chat API at `/api/chat`
+- Shared packages under `packages/*`
 
 ## Stack
 
@@ -23,7 +18,7 @@ This rebuild intentionally abandons the tangled older implementation path. Git h
 - TypeScript
 - Tailwind CSS
 - API routes
-- Web app only
+- npm workspaces
 
 ## Run locally
 
@@ -47,7 +42,7 @@ npm run build
 The repository includes `vercel.json` for a Vercel-connected Next.js deployment:
 
 - install command: `npm install`
-- build command: `npm run build -w @heather/web`
-- output directory: `apps/web/.next`
+- build command: `npm run build`
+- the root workspace script builds `apps/web`
 
 A push to the connected GitHub repository should trigger Vercel automatically if the project is already linked in Vercel.
