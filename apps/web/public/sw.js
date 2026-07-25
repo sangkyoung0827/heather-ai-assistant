@@ -1,4 +1,4 @@
-const CACHE_NAME = "heather-ai-assistant-v1";
+const CACHE_NAME = "heather-ai-assistant-v2";
 const SHELL_ASSETS = ["/", "/manifest.webmanifest", "/icons/heather-icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -23,6 +23,15 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  // App pages must stay current after a deployment. Use the cached shell only
+  // when the network is unavailable, rather than serving an old HTML page.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
