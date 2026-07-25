@@ -1,6 +1,5 @@
 import { getLlmConfig, isModelProfileConfigured, type LlmConfig } from "../config";
 import { LlmProviderError } from "../errors";
-import { recordLlmSuccess } from "../status";
 import type { LlmProvider, LlmRequest, LlmResponse, ModelProfile } from "../types";
 
 interface NvidiaApiResponse {
@@ -19,7 +18,6 @@ export class NvidiaLlmProvider implements LlmProvider {
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt += 1) {
       try {
         const response = await this.request(request);
-        recordLlmSuccess(this.profile.role);
         return response;
       } catch (error) {
         lastError = error instanceof LlmProviderError

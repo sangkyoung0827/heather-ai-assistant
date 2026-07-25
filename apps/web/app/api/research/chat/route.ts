@@ -4,7 +4,7 @@ import type { ChatRequestPayload } from "@heather/core";
 import { resolveModelProfile } from "../../../../lib/llm/config";
 import { LlmProviderError } from "../../../../lib/llm/errors";
 import { isValidChatPayload } from "../../../../lib/llm/messages";
-import { createConfiguredLlmProvider } from "../../../../lib/llm/provider";
+import { generateForModelRole } from "../../../../lib/llm/service";
 import { buildResearchContext } from "../../../../lib/research/context";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 
     const profile = resolveModelProfile("research");
     const { evidence, messages } = buildResearchContext(payload);
-    const response = await createConfiguredLlmProvider("research").generate({
+    const response = await generateForModelRole("research", {
       messages,
       temperature: profile.temperature,
       maxTokens: profile.maxTokens
