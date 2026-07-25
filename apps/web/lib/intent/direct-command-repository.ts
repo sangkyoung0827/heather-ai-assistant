@@ -123,7 +123,17 @@ export class DirectCommandRepository {
       memory.commands = memory.commands.map((command) => command.id === id ? { ...command, usageCount: command.usageCount + 1, lastUsedAt: new Date().toISOString() } : command);
       return;
     }
-    const { error } = await this.client.rpc("increment_direct_command_usage", { command_id: id });
+    // Keep usage accounting tied to the table schema rather than an optional database RPC.
+    const { data: command, error: readError } = await this.client
+      .from("direct_commands")
+      .select("usage_count")
+      .eq("id", id)
+      .single();
+    if (readError) throw readError;
+    const { error } = await this.client.from("direct_commands").update({
+      usage_count: Number(command.usage_count || 0) + 1,
+      last_used_at: new Date().toISOString()
+    }).eq("id", id);
     if (error) throw error;
   }
 
@@ -188,8 +198,9 @@ export class DirectCommandRepository {
     const read = await this.client.from("direct_commands").select("id", { head: true, count: "exact" }).limit(1);
     const triggerRead = await this.client.from("direct_command_triggers").select("id", { head: true, count: "exact" }).limit(1);
     if (read.error || triggerRead.error) return { provider: "unavailable", connected: false, readable: false, writable: false };
-    // The RPC updates zero rows for this sentinel UUID, so it checks write permission without touching user data.
-    const write = await this.client.rpc("increment_direct_command_usage", { command_id: "00000000-0000-0000-0000-000000000000" });
+    // This updates no rows because the sentinel UUID is never assigned to a user command.
+    // It verifies table write permission without creating or changing user data.
+    const write = await this.client.from("direct_commands").update({ updated_at: new Date().toISOString() }).eq("id", "00000000-0000-0000-0000-000000000000");
     return { provider: write.error ? "unavailable" : "supabase", connected: !write.error, readable: true, writable: !write.error };
   }
 
