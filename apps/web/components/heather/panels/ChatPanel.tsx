@@ -441,9 +441,12 @@ export function ChatPanel({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-10rem)] gap-4 md:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="flex min-h-0 flex-col rounded-lg border border-line bg-slate-50">
-        <div className="border-b border-line p-3">
+    <div className="chat-workspace">
+      <aside className="chat-conversation-panel">
+        <div className="chat-list-toolbar">
+          <button type="button" onClick={handleNewConversation} className="chat-new-conversation">
+            <MessageSquarePlus className="h-4 w-4" /> 새 대화
+          </button>
           <div className="flex items-center gap-2">
             <label className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -454,26 +457,18 @@ export function ChatPanel({
                 className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm"
               />
             </label>
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white text-heather-700 hover:bg-heather-50"
-              title="새 대화"
-              aria-label="새 대화"
-            >
-              <MessageSquarePlus className="h-4 w-4" />
-            </button>
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 heather-scrollbar">
+        <div className="chat-list-section"><span>최근 대화</span></div>
+        <div className="chat-conversation-list heather-scrollbar">
           {filteredConversations.length ? (
             filteredConversations.map((conversation) => (
               <button
                 key={conversation.id}
                 type="button"
                 onClick={() => setActiveConversationId(conversation.id)}
-                className={`group w-full rounded-lg border p-3 text-left transition ${
+                className={`chat-conversation-row group ${
                   activeConversationId === conversation.id
                     ? "border-heather-500 bg-white"
                     : "border-line bg-white hover:border-heather-300"
@@ -508,21 +503,21 @@ export function ChatPanel({
               </button>
             ))
           ) : (
-            <p className="p-4 text-sm text-slate-500">검색 결과가 없습니다.</p>
+            <p className="chat-list-empty">검색 결과가 없습니다.</p>
           )}
         </div>
       </aside>
 
-      <section className="flex min-h-[640px] min-w-0 flex-col rounded-lg border border-line bg-white">
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+      <section className="chat-main-panel">
+        <div className="chat-main-header">
           <div className="min-w-0">
             <h3 className="truncate font-semibold">{activeConversation?.title || "새 대화"}</h3>
             <p className="text-sm text-slate-500">Heather와 대화하며 작업을 이어가세요.</p>
           </div>
-          <Volume2 className="h-4 w-4 text-heather-700" aria-label="음성 읽기 지원" />
+          <span className="chat-status-dot"><span />Heather</span>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 heather-scrollbar">
+        <div className="chat-message-area heather-scrollbar">
           {activeConversation?.messages.length ? (
             activeConversation.messages.map((message) => (
               <article
@@ -530,7 +525,7 @@ export function ChatPanel({
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[840px] rounded-lg border px-4 py-3 text-sm leading-6 ${
+                    className={`chat-message max-w-[840px] ${
                     message.role === "user"
                       ? "border-heather-500 bg-heather-700 text-white"
                       : "border-line bg-white text-ink"
@@ -569,8 +564,12 @@ export function ChatPanel({
               </article>
             ))
           ) : (
-            <div className="flex h-full min-h-[360px] items-center justify-center text-center">
-              <div className="max-w-md"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-heather-50 text-heather-700"><MessageSquare className="h-6 w-6" /></div><p className="mt-5 font-semibold">안녕하세요, 저는 Heather예요.</p><p className="mt-2 text-sm text-slate-500">무엇을 도와드릴까요?</p><div className="mt-5 grid gap-2 text-left text-sm text-slate-600 sm:grid-cols-3"><span className="rounded-lg border border-line bg-white p-3">프로젝트 계획 수립</span><span className="rounded-lg border border-line bg-white p-3">문서 요약</span><span className="rounded-lg border border-line bg-white p-3">아이디어 정리</span></div></div>
+            <div className="chat-welcome">
+              <div className="chat-welcome-icon"><MessageSquare className="h-6 w-6" /></div>
+              <h2>안녕하세요, 저는 Heather예요.</h2><p>무엇을 도와드릴까요?</p>
+              <div className="chat-suggestions">
+                {[["프로젝트 계획 수립", "새 프로젝트의 다음 단계를 정리해줘"], ["문서 요약하기", "이 문서의 핵심 내용을 요약해줘"], ["아이디어 정리", "이 아이디어를 실행 가능한 항목으로 정리해줘"]].map(([label, prompt]) => <button key={label} type="button" onClick={() => setDraft(prompt)}>{label}<span>›</span></button>)}
+              </div>
             </div>
           )}
           {isSending && (
@@ -582,8 +581,8 @@ export function ChatPanel({
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-line p-3">
-          <div className="flex gap-2">
+        <div className="chat-composer-wrap">
+          <div className="chat-composer">
             <button
               type="button"
               onClick={toggleListening}

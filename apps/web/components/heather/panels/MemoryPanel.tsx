@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Archive, Database, Plus, Save, Trash2 } from "lucide-react";
+import { Archive, Database, Plus, Save, Search, Trash2 } from "lucide-react";
 import { createId, nowIso } from "@heather/core";
 import type { MemoryRecord, MemoryType } from "@heather/core";
 
@@ -98,9 +98,10 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
-      <aside className="rounded-lg border border-line bg-slate-50">
-        <div className="flex items-center justify-between border-b border-line p-3">
+    <div className="memory-workspace">
+      <aside className="memory-browser">
+        <div className="memory-type-tabs"><a href="/memory/personal" className={!isResearch ? "is-active" : ""}>개인 메모리 <span>{memories.filter((memory) => memory.type !== "project_context" && !memory.source.startsWith("research")).length}</span></a><a href="/memory/research" className={isResearch ? "is-active" : ""}>연구 메모리 <span>{memories.filter((memory) => memory.type === "project_context" || memory.source.startsWith("research")).length}</span></a></div>
+        <div className="memory-list-toolbar">
           <div className="flex items-center gap-2 font-semibold">
             <Database className="h-4 w-4 text-heather-700" />
             {title}
@@ -128,49 +129,47 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
             </button>
           </div>
         </div>
-        <div className="border-b border-line p-3"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`${title} 검색`} className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm" /></div>
-        <div className="max-h-[680px] space-y-2 overflow-y-auto p-3 heather-scrollbar">
+        <label className="memory-search"><Search className="h-4 w-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`${title} 검색`} /></label>
+        <div className="memory-list heather-scrollbar">
           {visibleMemories.length ? (
             visibleMemories.map((memory) => (
               <button
                 key={memory.id}
                 type="button"
                 onClick={() => setSelectedId(memory.id)}
-                className={`w-full rounded-lg border p-3 text-left transition ${
+                className={`memory-row ${
                   draft?.id === memory.id
                     ? "border-heather-500 bg-white"
                     : "border-line bg-white hover:border-heather-300"
                 } ${memory.archived ? "opacity-60" : ""}`}
               >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-semibold">{memory.type}</span>
-                  <span className="rounded-md bg-slate-100 px-2 py-1 text-xs">
-                    {Math.round(memory.confidence * 100)}%
-                  </span>
+                  <span className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold">{memory.source || "제목 없음"}</span>
+                  <span className="memory-date">{new Date(memory.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric" })}</span>
                 </span>
                 <span className="mt-2 line-clamp-3 text-sm leading-5 text-slate-600">{memory.content}</span>
               </button>
             ))
           ) : (
-            <div className="p-5 text-sm text-slate-500"><p className="font-semibold text-ink">아직 저장된 {title}가 없습니다.</p><p className="mt-2">{isResearch ? "연구 맥락과 기록을 저장하세요." : "Heather가 기억해야 할 개인 정보와 결정사항을 저장하세요."}</p></div>
+            <div className="workspace-empty"><strong>아직 저장된 {title}가 없습니다.</strong><p>{isResearch ? "실험 기록과 연구 메모를 저장해보세요." : "중요한 개인 정보와 결정사항을 저장해보세요."}</p></div>
           )}
         </div>
       </aside>
 
       {draft ? (
         <form
-          className="space-y-4 rounded-lg border border-line bg-white p-4"
+          className="memory-editor"
           onSubmit={(event) => {
             event.preventDefault();
             void handleSave();
           }}
         >
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="editor-heading">
             <div>
-              <p className="text-sm font-semibold text-heather-700">{isResearch ? "Research Memory" : "Personal Memory"}</p>
-              <h3 className="text-2xl font-semibold">{title} 등록 / 편집</h3>
+              <p>{isResearch ? "Research memory" : "Personal memory"}</p>
+              <h2>{title} 등록 / 편집</h2>
             </div>
-            <div className="flex gap-2">
+            <div className="editor-actions">
               <button
                 type="button"
                 onClick={handleArchive}
@@ -200,9 +199,9 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block">
-              <span className="text-sm font-medium">타입</span>
+          <div className="memory-editor-grid">
+            <label className="workspace-field">
+              <span>타입</span>
               <select
                 value={draft.type}
                 onChange={(event) => setDraft({ ...draft, type: event.target.value as MemoryType })}
@@ -216,8 +215,8 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
               </select>
             </label>
 
-            <label className="block">
-              <span className="text-sm font-medium">{isResearch ? "연구 또는 프로젝트명" : "제목 또는 출처"}</span>
+            <label className="workspace-field">
+              <span>{isResearch ? "연구 또는 프로젝트명" : "제목"}</span>
               <input
                 value={draft.source}
                 onChange={(event) => setDraft({ ...draft, source: event.target.value })}
@@ -226,8 +225,8 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
             </label>
           </div>
 
-          <label className="block">
-            <span className="text-sm font-medium">내용</span>
+          <label className="workspace-field">
+            <span>내용</span>
             <textarea
               value={draft.content}
               onChange={(event) => setDraft({ ...draft, content: event.target.value })}
@@ -236,21 +235,8 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
             />
           </label>
 
-          <label className="block">
-            <span className="text-sm font-medium">신뢰도 {Math.round(draft.confidence * 100)}%</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={draft.confidence}
-              onChange={(event) => setDraft({ ...draft, confidence: Number(event.target.value) })}
-              className="mt-2 w-full accent-heather-700"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium">태그</span>
+          <label className="workspace-field">
+            <span>태그</span>
             <input
               value={draft.tags.join(", ")}
               onChange={(event) =>
@@ -267,14 +253,10 @@ export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDe
             />
           </label>
 
-          <div className="rounded-lg border border-line bg-slate-50 p-3 text-sm text-slate-600">
-            메모리 저장이 꺼져 있으면 채팅에서 새 기억을 자동 제안하지 않습니다. 이 화면의 수동 저장은
-            사용자가 명시적으로 누른 경우에만 반영됩니다.
-          </div>
         </form>
       ) : (
-        <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
-          기억을 추가하면 헤더가 장기 맥락으로 사용할 수 있습니다.
+        <div className="memory-editor-empty">
+          새 메모리를 추가해 중요한 맥락을 기록하세요.
         </div>
       )}
     </div>
