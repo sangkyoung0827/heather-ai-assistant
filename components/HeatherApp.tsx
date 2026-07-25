@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { findDirectCommandMatch, formatMatchMetadata, normalizeDirectCommandText } from "../lib/direct-command-matching";
 import { createDirectCommandStore, readLegacyLocalStorageCommands, type DirectCommand, type DirectCommandInput } from "../lib/direct-command-store";
 
 type Message = { id: string; role: "user" | "assistant"; content: string; metadata?: string };
-type ApiResponse = { message?: string; error?: string };
+type ApiResponse = { message?: string; error?: string; provider?: string; model?: string };
+type HeatherView = "dashboard" | "direct" | "chat" | "memory" | "researcher";
 
 const emptyInput: DirectCommandInput = { title: "", question: "", response: "", enabled: true, tags: [], notes: "" };
 const uid = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -23,15 +24,18 @@ export default function HeatherApp() {
   const [notice, setNotice] = useState("");
   const [legacy, setLegacy] = useState<DirectCommandInput[]>([]);
   const [sending, setSending] = useState(false);
+  const [activeView, setActiveView] = useState<HeatherView>("dashboard");
+  const [memoryExpanded, setMemoryExpanded] = useState(false);
+  const [researcherExpanded, setResearcherExpanded] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     setCommands(await store.getAllDirectCommands());
-  }
+  }, [store]);
 
   useEffect(() => {
     void load().catch((error: unknown) => setNotice(error instanceof Error ? error.message : "직접명령을 불러오지 못했습니다."));
     setLegacy(readLegacyLocalStorageCommands());
-  }, []);
+  }, [load]);
 
   const enabled = commands.filter((command) => command.enabled).length;
   const disabled = commands.length - enabled;
@@ -70,7 +74,8 @@ export default function HeatherApp() {
     try {
       const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
       const data = (await response.json()) as ApiResponse;
-      setMessages((items) => [...items, { id: uid(), role: "assistant", content: data.message || data.error || "등록된 직접명령이 없어 API 응답으로 처리해야 합니다.", metadata: "api" }]);
+      const metadata = data.provider && data.model ? `${data.provider} · ${data.model}` : "api";
+      setMessages((items) => [...items, { id: uid(), role: "assistant", content: data.message || data.error || "등록된 직접명령이 없어 API 응답으로 처리해야 합니다.", metadata }]);
     } catch {
       setMessages((items) => [...items, { id: uid(), role: "assistant", content: "등록된 직접명령이 없어 API 응답으로 처리해야 합니다.", metadata: "api" }]);
     } finally {
@@ -114,16 +119,44 @@ export default function HeatherApp() {
     await load();
   }
 
+  const selectView = (view: HeatherView) => setActiveView(view);
+  const directPanel = <DirectCommandsPanel configured={store.isConfigured} commands={filtered} total={commands.length} enabled={enabled} disabled={disabled} draft={draft} editingId={editingId} search={search} legacyCount={legacy.length} importText={importText} exportText={exportText} setDraft={setDraft} setSearch={setSearch} setImportText={setImportText} saveCommand={saveCommand} edit={edit} remove={remove} toggle={toggle} cancel={() => { setDraft(emptyInput); setEditingId(null); }} migrate={migrate} exportJson={exportJson} importJson={importJson} />;
+  const chatPanel = <ChatPanel messages={messages} value={chatInput} sending={sending} onChange={setChatInput} onSubmit={sendChat} />;
+
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#123047_0,#020617_42%,#020617_100%)] text-slate-100">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
-        <Header configured={store.isConfigured} total={commands.length} enabled={enabled} sending={sending} />
-        {notice && <p className="rounded-2xl bg-cyan-300/10 px-4 py-3 text-sm text-cyan-100 ring-1 ring-cyan-300/20">{notice}</p>}
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.85fr)]">
-          <ChatPanel messages={messages} value={chatInput} sending={sending} onChange={setChatInput} onSubmit={sendChat} />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-1">
-            <MemoryPanel />
-            <DirectCommandsPanel configured={store.isConfigured} commands={filtered} total={commands.length} enabled={enabled} disabled={disabled} draft={draft} editingId={editingId} search={search} legacyCount={legacy.length} importText={importText} exportText={exportText} setDraft={setDraft} setSearch={setSearch} setImportText={setImportText} saveCommand={saveCommand} edit={edit} remove={remove} toggle={toggle} cancel={() => { setDraft(emptyInput); setEditingId(null); }} migrate={migrate} exportJson={exportJson} importJson={importJson} />
+    <main className="heather-neural-app">
+      <div className="neural-shell">
+        <header className="neural-header">
+          <div><p>Heather AI Operating System</p><h1>Neural Interface</h1></div>
+          <div className="neural-header-status"><span>{store.isConfigured ? "Synced" : "Local"}</span><span>{sending ? "Responding" : "Ready"}</span></div>
+        </header>
+
+        <section className="neural-map" aria-label="Heather navigation">
+          <div className="neural-line neural-line-top" />
+          <div className="neural-line neural-line-left" />
+          <div className="neural-line neural-line-right" />
+          <div className="neural-line neural-line-bottom" />
+          <button type="button" className="neural-core" onClick={() => selectView("dashboard")} aria-label="Open Dashboard"><span>H</span><strong>Heather</strong></button>
+          <NeuralNode label="Dashboard" detail="today and overview" position="top" active={activeView === "dashboard"} onClick={() => selectView("dashboard")} />
+          <NeuralNode label="Direct Command Registration" detail="saved responses" position="left" active={activeView === "direct"} onClick={() => selectView("direct")} />
+          <NeuralNode label="Chat" detail="conversation layer" position="right" active={activeView === "chat"} onClick={() => selectView("chat")} />
+          <NeuralNode label="Memory" detail="personal context" position="bottom" active={activeView === "memory"} expanded={memoryExpanded} onClick={() => { setMemoryExpanded((value) => !value); selectView("memory"); }} />
+          <NeuralNode label="Researcher" detail="materials and records" position="lower" active={activeView === "researcher"} expanded={researcherExpanded} onClick={() => { setResearcherExpanded((value) => !value); selectView("researcher"); }} />
+          {memoryExpanded && <><NeuralNode label="Personal Memory" detail="private recall" position="memory-left" active={false} onClick={() => selectView("memory")} /><NeuralNode label="Research Memory" detail="research context" position="memory-right" active={false} onClick={() => selectView("memory")} /></>}
+          {researcherExpanded && <><NeuralNode label="Research Material Registration" detail="teach Heather" position="research-left" active={false} onClick={() => selectView("researcher")} /><NeuralNode label="Research Records" detail="project archive" position="research-right" active={false} onClick={() => selectView("researcher")} /></>}
+        </section>
+
+        <div className="neural-status"><span>Voice standby</span><span>Commands {enabled}/{commands.length}</span><span>{store.isConfigured ? "Supabase connected" : "Local storage"}</span></div>
+        {notice && <p className="neural-notice">{notice}</p>}
+
+        <section className="neural-workspace" aria-live="polite">
+          <div className="neural-workspace-heading"><p>Selected node</p><h2>{activeView === "direct" ? "Direct Command Registration" : activeView.charAt(0).toUpperCase() + activeView.slice(1)}</h2></div>
+          <div key={activeView} className="neural-workspace-content">
+            {activeView === "dashboard" && <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.85fr)]">{chatPanel}<div className="grid grid-cols-1 gap-4"><MemoryPanel />{directPanel}</div></div>}
+            {activeView === "chat" && chatPanel}
+            {activeView === "direct" && directPanel}
+            {activeView === "memory" && <MemoryPanel />}
+            {activeView === "researcher" && <ResearcherPanel commandCount={commands.length} onOpenCommands={() => selectView("direct")} />}
           </div>
         </section>
       </div>
@@ -131,27 +164,14 @@ export default function HeatherApp() {
   );
 }
 
-function Header({ configured, total, enabled, sending }: { configured: boolean; total: number; enabled: number; sending: boolean }) {
+function NeuralNode({ label, detail, position, active, expanded, onClick }: { label: string; detail: string; position: string; active: boolean; expanded?: boolean; onClick: () => void }) {
   return (
-    <header className="rounded-3xl bg-white/[0.06] px-4 py-4 shadow-2xl shadow-black/20 ring-1 ring-white/10 backdrop-blur md:px-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-200/80">Heather Control</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-white md:text-3xl">헤더 통합 대시보드</h1>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs sm:flex sm:flex-wrap sm:justify-end">
-          <Status label="Voice" value="standby" />
-          <Status label="Mode" value={sending ? "responding" : "direct/API"} />
-          <Status label="Store" value={configured ? "Supabase" : "local"} />
-          <Status label="Commands" value={`${enabled}/${total}`} />
-        </div>
-      </div>
-    </header>
+    <button type="button" className={`neural-node neural-node-${position} ${active ? "is-active" : ""}`} aria-expanded={expanded} onClick={onClick}><span className="neural-node-dot" /><span><strong>{label}</strong><small>{detail}</small></span></button>
   );
 }
 
-function Status({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-2xl bg-slate-950/60 px-3 py-2 ring-1 ring-white/10"><p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p><p className="mt-1 font-semibold text-cyan-100">{value}</p></div>;
+function ResearcherPanel({ commandCount, onOpenCommands }: { commandCount: number; onOpenCommands: () => void }) {
+  return <section className="neural-researcher"><p>Researcher</p><h3>Materials and records</h3><span>{commandCount} saved direct commands are available as Heather’s current local reference set.</span><button type="button" onClick={onOpenCommands}>Open Direct Command Registration</button></section>;
 }
 
 function ChatPanel({ messages, value, sending, onChange, onSubmit }: { messages: Message[]; value: string; sending: boolean; onChange: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {

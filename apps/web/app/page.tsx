@@ -1,3 +1,5 @@
-import HeatherApp from "../components/HeatherApp";
+import { HeatherWorkspace } from "../components/heather/HeatherWorkspace";
 
-export default HeatherApp;
+export default function HomePage() {
+  return <HeatherWorkspace />;
+}
