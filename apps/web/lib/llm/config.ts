@@ -9,6 +9,7 @@ export interface LlmConfig {
   baseUrl: string;
   model?: string;
   maxOutputTokens: number;
+  researchMaxOutputTokens: number;
   timeoutMs: number;
   maxRetries: number;
   temperature: number;
@@ -35,6 +36,7 @@ export function getLlmConfig(): LlmConfig {
     baseUrl: (process.env.NVIDIA_API_BASE_URL || DEFAULT_NVIDIA_BASE_URL).replace(/\/$/, ""),
     model: process.env.NVIDIA_MODEL?.trim(),
     maxOutputTokens: integerFromEnv("LLM_MAX_OUTPUT_TOKENS", 1200, 32, 4096),
+    researchMaxOutputTokens: integerFromEnv("LLM_RESEARCH_MAX_OUTPUT_TOKENS", 900, 128, 4096),
     timeoutMs: integerFromEnv("LLM_TIMEOUT_MS", 45000, 1000, 120000),
     maxRetries: integerFromEnv("LLM_MAX_RETRIES", 2, 0, 4),
     temperature: numberFromEnv("LLM_TEMPERATURE", 0.3, 0, 1),
@@ -61,7 +63,7 @@ export function resolveModelProfile(role: HeatherModelRole, config = getLlmConfi
     modelId,
     systemPrompt: isResearch ? HEATHER_RESEARCH_SYSTEM_PROMPT : HEATHER_GENERAL_SYSTEM_PROMPT,
     temperature: isResearch ? 0.2 : config.temperature,
-    maxTokens: isResearch ? Math.max(config.maxOutputTokens, 2400) : config.maxOutputTokens,
+    maxTokens: isResearch ? config.researchMaxOutputTokens : config.maxOutputTokens,
     timeoutMs: config.timeoutMs,
     supportsReasoning: false,
     supportsTools: false,
