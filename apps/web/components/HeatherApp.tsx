@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { findDirectCommandMatch, formatMatchMetadata, normalizeDirectCommandText } from "../lib/direct-command-matching";
 import { createDirectCommandStore, readLegacyLocalStorageCommands, type DirectCommand, type DirectCommandInput } from "../lib/direct-command-store";
 
@@ -24,14 +24,14 @@ export default function HeatherApp() {
   const [legacy, setLegacy] = useState<DirectCommandInput[]>([]);
   const [sending, setSending] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     setCommands(await store.getAllDirectCommands());
-  }
+  }, [store]);
 
   useEffect(() => {
     void load().catch((error: unknown) => setNotice(error instanceof Error ? error.message : "직접명령을 불러오지 못했습니다."));
     setLegacy(readLegacyLocalStorageCommands());
-  }, []);
+  }, [load]);
 
   const enabled = commands.filter((command) => command.enabled).length;
   const disabled = commands.length - enabled;

@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "description": "Heather web-first personal AI assistant MVP.",
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "dev": "npm run dev -w @heather/web",
+    "build": "npm run build -w @heather/web",
+    "lint": "npm run lint -w @heather/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=20"
