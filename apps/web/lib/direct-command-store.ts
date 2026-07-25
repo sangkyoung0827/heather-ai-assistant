@@ -20,6 +20,8 @@ export type DirectCommandInput = {
   tags?: string[];
 };
 
+export type ImportSummary = { created: number; merged: number; skipped: number; failed: number };
+
 export type DirectCommandStore = {
   getAllDirectCommands(search?: string): Promise<DirectCommand[]>;
   createDirectCommand(input: DirectCommandInput): Promise<DirectCommand>;
@@ -27,7 +29,7 @@ export type DirectCommandStore = {
   deleteDirectCommand(id: string): Promise<void>;
   enableDirectCommand(id: string): Promise<DirectCommand>;
   disableDirectCommand(id: string): Promise<DirectCommand>;
-  importDirectCommands(commands: DirectCommandInput[]): Promise<DirectCommand[]>;
+  importDirectCommands(commands: DirectCommandInput[]): Promise<ImportSummary>;
   exportDirectCommands(): Promise<DirectCommandInput[]>;
 };
 
@@ -44,7 +46,7 @@ export function createDirectCommandStore(): DirectCommandStore {
     async deleteDirectCommand(id) { await request(`/api/direct-commands/${id}`, { method: "DELETE" }); },
     async enableDirectCommand(id) { return this.updateDirectCommand(id, { enabled: true }); },
     async disableDirectCommand(id) { return this.updateDirectCommand(id, { enabled: false }); },
-    async importDirectCommands(commands) { return (await request<{ commands: DirectCommand[] }>("/api/direct-commands/import", { method: "POST", body: JSON.stringify({ commands }) })).commands; },
+    async importDirectCommands(commands) { return (await request<{ summary: ImportSummary }>("/api/direct-commands/import", { method: "POST", body: JSON.stringify({ commands }) })).summary; },
     async exportDirectCommands() { return (await request<{ commands: DirectCommandInput[] }>("/api/direct-commands/export")).commands; }
   };
 }

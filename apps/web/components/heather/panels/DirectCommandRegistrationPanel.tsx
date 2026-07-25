@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Download, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
-import { createDirectCommandStore, readLegacyLocalStorageCommands, type DirectCommand, type DirectCommandInput } from "../../../lib/direct-command-store";
+import { createDirectCommandStore, readLegacyLocalStorageCommands, type DirectCommand, type DirectCommandInput, type ImportSummary } from "../../../lib/direct-command-store";
 
 const emptyInput: DirectCommandInput = { title: "", canonicalTrigger: "", triggers: [], response: "", enabled: true, tags: [] };
 
@@ -16,9 +16,10 @@ export function DirectCommandRegistrationPanel() {
   const [exportText, setExportText] = useState("");
   const [legacy, setLegacy] = useState<DirectCommandInput[]>([]);
   const [notice, setNotice] = useState("");
+  const [storageState, setStorageState] = useState<"Connected" | "Local fallback" | "Unavailable">("Unavailable");
 
   const load = useCallback(async (query = search) => setCommands(await store.getAllDirectCommands(query)), [search, store]);
-  useEffect(() => { void load("").catch(showError); setLegacy(readLegacyLocalStorageCommands()); }, [load]);
+  useEffect(() => { void load("").catch(showError); setLegacy(readLegacyLocalStorageCommands()); void fetch("/api/system/storage-status").then((response) => response.json()).then((status: { provider?: string; connected?: boolean }) => setStorageState(status.provider === "supabase" && status.connected ? "Connected" : status.provider === "local" ? "Local fallback" : "Unavailable")).catch(() => setStorageState("Unavailable")); }, [load]);
 
   async function refresh() { await load(); }
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -30,11 +31,11 @@ export function DirectCommandRegistrationPanel() {
   async function toggle(command: DirectCommand) { try { await store.updateDirectCommand(command.id, { enabled: !command.enabled }); await refresh(); } catch (error) { showError(error); } }
   async function remove(command: DirectCommand) { if (window.confirm(`“${command.title}” 직접명령을 삭제할까요?`)) try { await store.deleteDirectCommand(command.id); await refresh(); } catch (error) { showError(error); } }
   async function searchCommands(value: string) { setSearch(value); try { setCommands(await store.getAllDirectCommands(value)); } catch (error) { showError(error); } }
-  async function importCommands(items: DirectCommandInput[]) { try { const created = await store.importDirectCommands(items); setNotice(`${created.length}개 직접명령을 가져왔습니다.`); await refresh(); } catch (error) { showError(error); } }
+  async function importCommands(items: DirectCommandInput[]) { try { const summary = await store.importDirectCommands(items); setNotice(formatImportSummary(summary)); await refresh(); } catch (error) { showError(error); } }
   function showError(error: unknown) { setNotice(error instanceof Error ? error.message : "직접명령 요청을 완료하지 못했습니다."); }
 
   return <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-    <section className="rounded-lg border border-line bg-white p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-heather-700">Direct Command Registration</p><h3 className="text-lg font-semibold">직접명령 관리</h3></div></div>
+    <section className="rounded-lg border border-line bg-white p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-heather-700">Direct Command Registration</p><h3 className="text-lg font-semibold">직접명령 관리</h3></div><span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{storageState}</span></div>
       {legacy.length > 0 && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-heather-50 p-3 text-sm"><span>기존 브라우저 저장 명령을 서버로 가져올 수 있습니다.</span><button type="button" onClick={() => { void importCommands(legacy); setLegacy([]); }} className="rounded-md bg-heather-700 px-3 py-2 text-white">가져오기</button></div>}
       {notice && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{notice}</p>}
       <label className="mt-4 block text-sm font-medium">검색<input value={search} onChange={(event) => void searchCommands(event.target.value)} placeholder="명령 이름, 트리거, 태그 검색" className="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2" /></label>
@@ -48,3 +49,4 @@ export function DirectCommandRegistrationPanel() {
 
 function Field({ label, hint, textarea, value, onChange }: { label: string; hint?: string; textarea?: boolean; value: string; onChange: (value: string) => void }) { const Component = textarea ? "textarea" : "input"; return <label className="mt-3 block text-sm font-medium">{label}{hint && <span className="ml-2 text-xs text-slate-500">{hint}</span>}<Component value={value} onChange={(event) => onChange(event.target.value)} className={`mt-1 w-full rounded-lg border border-line px-3 py-2 ${textarea ? "min-h-20" : ""}`} /></label>; }
 function cleanList(values: string[] | undefined) { return [...new Set((values || []).map((value) => value.trim()).filter(Boolean))]; }
+function formatImportSummary(summary: ImportSummary) { return `가져오기 완료: 생성 ${summary.created} · 트리거 병합 ${summary.merged} · 건너뜀 ${summary.skipped} · 실패 ${summary.failed}`; }

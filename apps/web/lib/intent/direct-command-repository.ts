@@ -22,6 +22,9 @@ export type DirectCommandInput = {
   tags?: string[];
 };
 
+export type ImportSummary = { created: number; merged: number; skipped: number; failed: number };
+export type StorageStatus = { provider: "supabase" | "local" | "unavailable"; connected: boolean; readable: boolean; writable: boolean };
+
 type QueryPattern = { normalized: string; examples: string[]; count: number; response: string };
 type MemoryState = { commands: DirectCommandRecord[]; patterns: Map<string, QueryPattern> };
 
@@ -124,13 +127,24 @@ export class DirectCommandRepository {
     if (error) throw error;
   }
 
-  async import(items: unknown): Promise<DirectCommandRecord[]> {
+  async import(items: unknown): Promise<ImportSummary> {
     if (!Array.isArray(items) || items.length > MAX_IMPORT_COMMANDS) throw new Error("Invalid import payload.");
-    const created: DirectCommandRecord[] = [];
+    const summary: ImportSummary = { created: 0, merged: 0, skipped: 0, failed: 0 };
     for (const item of items) {
-      try { created.push(await this.create(item as DirectCommandInput)); } catch (error) { if (!(error instanceof Error) || !error.message.includes("already exists")) throw error; }
+      try {
+        const input = validateInput(item as DirectCommandInput);
+        const existing = await this.find(input.canonicalTrigger);
+        if (!existing) { await this.create(input); summary.created += 1; continue; }
+        const record = (await this.list()).find((command) => command.id === existing.command.id);
+        if (!record) { summary.failed += 1; continue; }
+        const candidates = [...record.triggers, input.canonicalTrigger, ...input.triggers];
+        const mergedTriggers = uniqueTriggers(record.canonicalTrigger, candidates);
+        if (mergedTriggers.length === record.triggers.length) { summary.skipped += 1; continue; }
+        await this.update(record.id, { triggers: mergedTriggers });
+        summary.merged += 1;
+      } catch { summary.failed += 1; }
     }
-    return created;
+    return summary;
   }
 
   async export() {
@@ -169,6 +183,16 @@ export class DirectCommandRepository {
     if (error) throw error;
   }
 
+  async storageStatus(): Promise<StorageStatus> {
+    if (!this.client) return { provider: "local", connected: false, readable: false, writable: false };
+    const read = await this.client.from("direct_commands").select("id", { head: true, count: "exact" }).limit(1);
+    const triggerRead = await this.client.from("direct_command_triggers").select("id", { head: true, count: "exact" }).limit(1);
+    if (read.error || triggerRead.error) return { provider: "unavailable", connected: false, readable: false, writable: false };
+    // The RPC updates zero rows for this sentinel UUID, so it checks write permission without touching user data.
+    const write = await this.client.rpc("increment_direct_command_usage", { command_id: "00000000-0000-0000-0000-000000000000" });
+    return { provider: write.error ? "unavailable" : "supabase", connected: !write.error, readable: true, writable: !write.error };
+  }
+
   private async listSupabase(): Promise<DirectCommandRecord[]> {
     const { data: rows, error } = await this.client!.from("direct_commands").select("*, direct_command_triggers(trigger)").order("created_at", { ascending: false });
     if (error) throw error;
@@ -186,9 +210,20 @@ function validateInput(input: DirectCommandInput) {
   const canonicalTrigger = input.canonicalTrigger?.trim();
   const response = input.response?.trim();
   if (!title || !canonicalTrigger || !response || title.length > 160 || canonicalTrigger.length > MAX_TEXT_LENGTH || response.length > MAX_TEXT_LENGTH) throw new Error("Title, trigger, and response are required.");
-  const triggers = [...new Set((input.triggers || []).map((trigger) => trigger.trim()).filter(Boolean))].filter((trigger) => normalizeIntentText(trigger) !== normalizeIntentText(canonicalTrigger));
+  const triggers = uniqueTriggers(canonicalTrigger, input.triggers || []);
   if (triggers.length > MAX_TRIGGERS) throw new Error("Too many triggers.");
   return { title, canonicalTrigger, triggers, response, enabled: input.enabled !== false, tags: [...new Set((input.tags || []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12) };
+}
+
+function uniqueTriggers(canonicalTrigger: string, triggers: string[]) {
+  const canonical = normalizeIntentText(canonicalTrigger);
+  const seen = new Set<string>();
+  return triggers.map((trigger) => trigger.trim()).filter((trigger) => {
+    const normalized = normalizeIntentText(trigger);
+    if (!normalized || normalized === canonical || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  }).slice(0, MAX_TRIGGERS);
 }
 
 function truncate(value: string, length: number) { return value.length > length ? `${value.slice(0, length - 1)}…` : value; }
