@@ -20,3 +20,17 @@ export interface LlmResponse {
 export interface LlmProvider {
   generate(request: LlmRequest): Promise<LlmResponse>;
 }
+
+export type HeatherModelRole = "general" | "research" | "fallback";
+
+export interface ModelProfile {
+  role: HeatherModelRole;
+  modelId?: string;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  timeoutMs: number;
+  supportsReasoning: boolean;
+  supportsTools: boolean;
+  supportsStreaming: boolean;
+}

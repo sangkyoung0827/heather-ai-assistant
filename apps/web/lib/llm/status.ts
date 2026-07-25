@@ -1,25 +1,30 @@
-import { getLlmConfig, isNvidiaConfigured } from "./config";
+import { getLlmConfig, isModelProfileConfigured, resolveModelProfile } from "./config";
+import type { HeatherModelRole } from "./types";
 
 declare global {
   // eslint-disable-next-line no-var
-  var heatherLlmLastSuccessAt: number | undefined;
+  var heatherLlmLastSuccessAt: Partial<Record<HeatherModelRole, number>> | undefined;
 }
 
-export function recordLlmSuccess(): void {
-  globalThis.heatherLlmLastSuccessAt = Date.now();
+export function recordLlmSuccess(role: HeatherModelRole): void {
+  globalThis.heatherLlmLastSuccessAt = { ...globalThis.heatherLlmLastSuccessAt, [role]: Date.now() };
 }
 
 export function getLlmStatus() {
   const config = getLlmConfig();
-  const connected = isNvidiaConfigured(config);
+  const profileStatus = (role: HeatherModelRole) => {
+    const profile = resolveModelProfile(role, config);
+    const lastSuccessAt = globalThis.heatherLlmLastSuccessAt?.[role];
+    return {
+      configured: isModelProfileConfigured(profile, config),
+      verified: Boolean(lastSuccessAt),
+      lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : null
+    };
+  };
 
   return {
-    provider: connected ? "nvidia" : "unavailable",
-    configured: connected,
-    verified: connected && Boolean(globalThis.heatherLlmLastSuccessAt),
-    available: connected,
-    lastSuccessAt: globalThis.heatherLlmLastSuccessAt
-      ? new Date(globalThis.heatherLlmLastSuccessAt).toISOString()
-      : null
+    provider: config.provider === "nvidia" ? "nvidia" : "unavailable",
+    general: profileStatus("general"),
+    research: profileStatus("research")
   };
 }

@@ -1,17 +1,17 @@
-import { getLlmConfig, isNvidiaConfigured, type LlmConfig } from "../config";
+import { getLlmConfig, isModelProfileConfigured, type LlmConfig } from "../config";
 import { LlmProviderError } from "../errors";
 import { recordLlmSuccess } from "../status";
-import type { LlmProvider, LlmRequest, LlmResponse } from "../types";
+import type { LlmProvider, LlmRequest, LlmResponse, ModelProfile } from "../types";
 
 interface NvidiaApiResponse {
   choices?: Array<{ message?: { content?: string } }>;
 }
 
 export class NvidiaLlmProvider implements LlmProvider {
-  constructor(private readonly config: LlmConfig = getLlmConfig()) {}
+  constructor(private readonly config: LlmConfig, private readonly profile: ModelProfile) {}
 
   async generate(request: LlmRequest): Promise<LlmResponse> {
-    if (!isNvidiaConfigured(this.config)) {
+    if (!isModelProfileConfigured(this.profile, this.config)) {
       throw new LlmProviderError("configuration", false);
     }
 
@@ -19,7 +19,7 @@ export class NvidiaLlmProvider implements LlmProvider {
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt += 1) {
       try {
         const response = await this.request(request);
-        recordLlmSuccess();
+        recordLlmSuccess(this.profile.role);
         return response;
       } catch (error) {
         lastError = error instanceof LlmProviderError
@@ -44,7 +44,7 @@ export class NvidiaLlmProvider implements LlmProvider {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: this.config.model,
+          model: this.profile.modelId,
           messages: request.messages,
           temperature: request.temperature,
           max_tokens: request.maxTokens,
@@ -58,7 +58,7 @@ export class NvidiaLlmProvider implements LlmProvider {
       const body = await response.json() as NvidiaApiResponse;
       const content = body.choices?.[0]?.message?.content?.trim();
       if (!content) throw new LlmProviderError("invalid_response", true);
-      return { content, provider: "nvidia", model: this.config.model! };
+      return { content, provider: "nvidia", model: this.profile.modelId! };
     } catch (error) {
       if (error instanceof LlmProviderError) throw error;
       if (error instanceof DOMException && error.name === "AbortError") {

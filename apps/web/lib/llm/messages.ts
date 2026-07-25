@@ -1,11 +1,10 @@
 import type { ChatRequestPayload, ConversationMessage } from "@heather/core";
 import { getLlmConfig } from "./config";
-import { HEATHER_SYSTEM_PROMPT } from "./system-prompt";
 import type { LlmMessage } from "./types";
 
 const allowedRoles = new Set<ConversationMessage["role"]>(["user", "assistant"]);
 
-export function buildLlmMessages(payload: ChatRequestPayload): LlmMessage[] {
+export function buildLlmMessages(payload: ChatRequestPayload, systemPrompt: string): LlmMessage[] {
   const config = getLlmConfig();
   const history = (payload.conversation?.messages || [])
     .filter((message) => allowedRoles.has(message.role) && message.content.trim())
@@ -14,7 +13,7 @@ export function buildLlmMessages(payload: ChatRequestPayload): LlmMessage[] {
     .map((message) => ({ role: message.role, content: message.content.trim().slice(0, config.maxInputChars) }));
 
   return [
-    { role: "system", content: HEATHER_SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     ...history,
     { role: "user", content: payload.message.trim() }
   ];

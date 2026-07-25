@@ -1,3 +1,6 @@
+import { HEATHER_GENERAL_SYSTEM_PROMPT, HEATHER_RESEARCH_SYSTEM_PROMPT } from "./system-prompt";
+import type { HeatherModelRole, ModelProfile } from "./types";
+
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
 export interface LlmConfig {
@@ -41,5 +44,31 @@ export function getLlmConfig(): LlmConfig {
 }
 
 export function isNvidiaConfigured(config = getLlmConfig()): boolean {
-  return config.provider === "nvidia" && Boolean(config.apiKey && config.model);
+  return config.provider === "nvidia" && Boolean(config.apiKey);
+}
+
+export function resolveModelProfile(role: HeatherModelRole, config = getLlmConfig()): ModelProfile {
+  const legacyFallback = process.env.NVIDIA_MODEL_FALLBACK?.trim() || config.model;
+  const modelId = role === "general"
+    ? process.env.NVIDIA_MODEL_GENERAL?.trim() || legacyFallback
+    : role === "research"
+      ? process.env.NVIDIA_MODEL_RESEARCH?.trim() || legacyFallback
+      : legacyFallback;
+  const isResearch = role === "research";
+
+  return {
+    role,
+    modelId,
+    systemPrompt: isResearch ? HEATHER_RESEARCH_SYSTEM_PROMPT : HEATHER_GENERAL_SYSTEM_PROMPT,
+    temperature: isResearch ? 0.2 : config.temperature,
+    maxTokens: isResearch ? Math.max(config.maxOutputTokens, 2400) : config.maxOutputTokens,
+    timeoutMs: config.timeoutMs,
+    supportsReasoning: false,
+    supportsTools: false,
+    supportsStreaming: false
+  };
+}
+
+export function isModelProfileConfigured(profile: ModelProfile, config = getLlmConfig()): boolean {
+  return isNvidiaConfigured(config) && Boolean(profile.modelId);
 }

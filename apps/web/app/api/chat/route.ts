@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { generateConversationTitle } from "@heather/core";
 import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
-import { getLlmConfig } from "../../../lib/llm/config";
+import { getLlmConfig, resolveModelProfile } from "../../../lib/llm/config";
 import { LlmProviderError } from "../../../lib/llm/errors";
 import { buildLlmMessages, isValidChatPayload } from "../../../lib/llm/messages";
 import { createConfiguredLlmProvider } from "../../../lib/llm/provider";
@@ -36,11 +36,12 @@ export async function POST(request: Request) {
     }
 
     const config = getLlmConfig();
-    const provider = createConfiguredLlmProvider();
+    const profile = resolveModelProfile("general");
+    const provider = createConfiguredLlmProvider("general");
     const response = await provider.generate({
-      messages: buildLlmMessages(payload),
-      temperature: config.temperature,
-      maxTokens: config.maxOutputTokens
+      messages: buildLlmMessages(payload, profile.systemPrompt),
+      temperature: profile.temperature,
+      maxTokens: profile.maxTokens
     });
     const result: CachedChatResponse = {
       message: response.content,
