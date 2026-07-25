@@ -157,7 +157,7 @@ export const ALLOWED_HEATHER_ACTIONS: Array<{
   },
   {
     name: "open_app",
-    description: "허용 목록에 있는 앱만 실행합니다. Terminal은 열 수 있지만 command 실행은 금지합니다.",
+    description: "허용 목록에 있는 앱만 실행합니다. 임의 shell command 실행은 금지합니다.",
     riskLevel: "high",
     requiresConfirmation: true
   },
@@ -596,7 +596,7 @@ function inferAppName(input: string): string | null {
     [/calendar|캘린더/i, "Calendar"],
     [/music|음악/i, "Music"],
     [/zoom|줌/i, "Zoom"],
-    [/terminal|터미널/i, "Terminal"]
+    [/capcut|캡컷/i, "CapCut"]
   ];
 
   return appMap.find(([pattern]) => pattern.test(input))?.[1] || null;

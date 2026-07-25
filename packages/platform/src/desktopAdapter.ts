@@ -1,5 +1,6 @@
 import type {
   AllowedDirectory,
+  DesktopActionResult,
   FileItem,
   FileSearchOptions,
   MediaActionResult,
@@ -26,7 +27,7 @@ export const DESKTOP_APP_ALLOWLIST = [
   "Calendar",
   "Music",
   "Zoom",
-  "Terminal"
+  "CapCut"
 ];
 
 export function isTauriRuntime(): boolean {
@@ -97,8 +98,32 @@ export class TauriDesktopPlatformAdapter implements PlatformAdapter {
     await invokeTauri("open_app", { appName });
   }
 
+  async openUrl(url: string): Promise<DesktopActionResult> {
+    return invokeTauri<DesktopActionResult>("open_url", { url });
+  }
+
+  async searchWeb(query: string): Promise<DesktopActionResult> {
+    return invokeTauri<DesktopActionResult>("search_web", { query });
+  }
+
+  async searchYouTube(query: string): Promise<DesktopActionResult> {
+    return invokeTauri<DesktopActionResult>("search_youtube", { query });
+  }
+
+  async searchYouTubeMusic(query: string): Promise<DesktopActionResult> {
+    return invokeTauri<DesktopActionResult>("search_youtube_music", { query });
+  }
+
   async playYouTubeMusic(query: string): Promise<MediaActionResult> {
     return invokeTauri<MediaActionResult>("play_youtube_music", { query });
+  }
+
+  async speakMacos(text: string, voice?: string, rate?: number): Promise<DesktopActionResult> {
+    return invokeTauri<DesktopActionResult>("speak_macos", { text, voice, rate });
+  }
+
+  async stopSpeaking(): Promise<DesktopActionResult> {
+    return invokeTauri<DesktopActionResult>("stop_speaking");
   }
 
   async getClipboardText(): Promise<string> {

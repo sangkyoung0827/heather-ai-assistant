@@ -43,6 +43,13 @@ export interface MediaActionResult {
   message: string;
 }
 
+export interface DesktopActionResult {
+  actionName: string;
+  target: string;
+  url?: string;
+  message: string;
+}
+
 export interface PlatformAdapter {
   getPlatformName(): "web" | "desktop";
   getSystemInfo?(): Promise<SystemInfo>;
@@ -54,7 +61,13 @@ export interface PlatformAdapter {
   readTextFile?(fileId: string): Promise<TextFileReadResult>;
   openExternalUrl(url: string): Promise<void>;
   openLocalApp?(appName: string): Promise<void>;
+  openUrl?(url: string): Promise<DesktopActionResult>;
+  searchWeb?(query: string): Promise<DesktopActionResult>;
+  searchYouTube?(query: string): Promise<DesktopActionResult>;
+  searchYouTubeMusic?(query: string): Promise<DesktopActionResult>;
   playYouTubeMusic?(query: string): Promise<MediaActionResult>;
+  speakMacos?(text: string, voice?: string, rate?: number): Promise<DesktopActionResult>;
+  stopSpeaking?(): Promise<DesktopActionResult>;
   captureScreen?(): Promise<Blob>;
   getClipboardText?(): Promise<string>;
   setClipboardText?(text: string): Promise<void>;

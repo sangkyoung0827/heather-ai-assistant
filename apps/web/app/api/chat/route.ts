@@ -1,32 +1,266 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
+import { createLocalAIProvider, createOllamaProvider, createOpenAIProvider } from "@heather/ai";
+import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
 
 export const runtime = "nodejs";
 
-type ChatRequest = {
-  message?: string;
-};
-
-export async function GET() {
-  return NextResponse.json({
-    status: "ok",
-    route: "api",
-    provider: "mock",
-    model: "mock-fallback"
-  });
+interface CachedChatResponse extends ChatResponsePayload {
+  provider: string;
+  cached?: boolean;
+  meteredApiCall?: boolean;
+  providerWarning?: string;
 }
 
-export async function POST(request: Request) {
-  const payload = (await request.json().catch(() => ({}))) as ChatRequest;
-  const message = payload.message?.trim();
+declare global {
+  // eslint-disable-next-line no-var
+  var heatherChatCache: Map<string, CachedChatResponse> | undefined;
+  // eslint-disable-next-line no-var
+  var heatherPaidApiCounters: Map<string, number> | undefined;
+}
 
-  if (!message) {
-    return NextResponse.json({ error: "메시지를 입력하세요." }, { status: 400 });
+const chatCache = globalThis.heatherChatCache ?? new Map<string, CachedChatResponse>();
+globalThis.heatherChatCache = chatCache;
+
+const paidApiCounters = globalThis.heatherPaidApiCounters ?? new Map<string, number>();
+globalThis.heatherPaidApiCounters = paidApiCounters;
+
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const DEFAULT_OLLAMA_MODEL = "gemma4:latest";
+
+export async function POST(request: Request) {
+  try {
+    const payload = (await request.json()) as ChatRequestPayload;
+
+    if (!payload.message?.trim()) {
+      return NextResponse.json({ error: "Message is required." }, { status: 400 });
+    }
+
+    const localProvider = createLocalAIProvider();
+    const cacheKey = createCacheKey(payload);
+    const providerModelStatusQuestion = asksCurrentProviderOrModel(payload.message);
+
+    if (payload.settings.cacheResponses && !providerModelStatusQuestion) {
+      const cached = chatCache.get(cacheKey);
+      if (cached) {
+        return NextResponse.json({
+          ...cached,
+          cached: true
+        });
+      }
+    }
+
+    if (payload.settings.aiMode === "local_only") {
+      const localResponse = await localProvider.generateChat(payload);
+      return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
+        ...localResponse,
+        provider: "local-heather"
+      }));
+    }
+
+    const ollamaBaseUrl =
+      process.env.HEATHER_OLLAMA_BASE_URL ||
+      process.env.OLLAMA_BASE_URL ||
+      payload.settings.ollamaBaseUrl ||
+      DEFAULT_OLLAMA_BASE_URL;
+    const ollamaModel =
+      process.env.HEATHER_OLLAMA_MODEL ||
+      process.env.OLLAMA_MODEL ||
+      payload.settings.ollamaModel ||
+      DEFAULT_OLLAMA_MODEL;
+
+    if (ollamaBaseUrl) {
+      try {
+        const provider = createOllamaProvider({ baseUrl: ollamaBaseUrl, model: ollamaModel });
+        const response = await provider.generateChat(payload);
+        return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
+          ...response,
+          provider: "ollama",
+          model: response.model || ollamaModel
+        }));
+      } catch (error) {
+        if (payload.settings.aiMode === "local_model" || payload.settings.aiMode === "cloud_allowed") {
+          return NextResponse.json(
+            {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요."
+            },
+            { status: 503 }
+          );
+        }
+      }
+    }
+
+    if (payload.settings.aiMode === "local_model") {
+      return NextResponse.json(
+        {
+          error: "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요."
+        },
+        { status: 503 }
+      );
+    }
+
+    const openAIKey = process.env.OPENAI_API_KEY;
+    const model = process.env.OPENAI_MODEL;
+    const paidProviderEnabled = process.env.HEATHER_ALLOW_PAID_API === "true";
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const clientMonthCount =
+      payload.settings.apiUsageMonth === currentMonth ? payload.settings.apiCallsThisMonth : 0;
+    const serverMonthCount = paidApiCounters.get(currentMonth) || 0;
+    const monthlyLimit = Math.max(0, payload.settings.monthlyApiCallLimit);
+    const paidApiAllowed =
+      payload.settings.aiMode === "cloud_allowed" &&
+      payload.settings.allowPaidApiCalls &&
+      paidProviderEnabled &&
+      Boolean(openAIKey) &&
+      monthlyLimit > 0 &&
+      clientMonthCount < monthlyLimit &&
+      serverMonthCount < monthlyLimit;
+
+    if (!paidApiAllowed) {
+      const localResponse = await localProvider.generateChat(payload);
+      return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
+        ...localResponse,
+        provider: "local-heather",
+        providerWarning: explainPaidApiBlock({
+          hasKey: Boolean(openAIKey),
+          paidProviderEnabled,
+          allowPaidApiCalls: payload.settings.allowPaidApiCalls,
+          monthlyLimit,
+          clientMonthCount,
+          serverMonthCount
+        })
+      }));
+    }
+
+    try {
+      const provider = createOpenAIProvider({ apiKey: openAIKey, model });
+      const response = await provider.generateChat(payload);
+      paidApiCounters.set(currentMonth, serverMonthCount + 1);
+      return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
+        ...response,
+        provider: "openai",
+        meteredApiCall: true
+      }));
+    } catch (error) {
+      const localResponse = await localProvider.generateChat(payload);
+      return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
+        ...localResponse,
+        provider: "local-heather",
+        providerWarning:
+          error instanceof Error ? error.message : "OpenAI provider failed, local fallback used."
+      }));
+    }
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Unknown chat route error."
+      },
+      { status: 500 }
+    );
+  }
+}
+
+function cacheIfNeeded(
+  cacheKey: string,
+  payload: ChatRequestPayload,
+  response: CachedChatResponse
+): CachedChatResponse {
+  if (payload.settings.cacheResponses && !asksCurrentProviderOrModel(payload.message)) {
+    chatCache.set(cacheKey, response);
   }
 
-  return NextResponse.json({
-    message: "등록된 직접명령이 없어 API 응답으로 처리해야 합니다.",
-    route: "api",
-    provider: "mock",
-    model: "mock-fallback"
-  });
+  return response;
+}
+
+function asksCurrentProviderOrModel(message: string): boolean {
+  const normalized = message.toLowerCase();
+  const asksRuntime =
+    /모델|model|provider|프로바이더|제공자|엔진|backend|백엔드|api|런타임|runtime|상태|status|로컬\s*모델/.test(
+      normalized
+    );
+  const asksCurrent = /현재|지금|사용\s*중|쓰고|뭐야|무엇|알려|확인|check|current/.test(normalized);
+
+  return asksCurrent && asksRuntime;
+}
+
+function createCacheKey(payload: ChatRequestPayload): string {
+  const compactPayload = {
+    message: payload.message.trim().toLowerCase(),
+    tone: payload.settings.tone,
+    aiMode: payload.settings.aiMode,
+    ollamaBaseUrl: payload.settings.ollamaBaseUrl,
+    ollamaModel: payload.settings.ollamaModel,
+    memories: payload.memories
+      .filter((memory) => !memory.archived)
+      .slice(0, 4)
+      .map((memory) => [memory.type, memory.content.slice(0, 180), memory.tags.slice(0, 4)]),
+    projects: payload.projects
+      .slice(0, 4)
+      .map((project) => [
+        project.title,
+        project.status,
+        project.priority,
+        project.next_actions.slice(0, 3)
+      ]),
+    teachings: (payload.teachings || [])
+      .filter((teaching) => teaching.active)
+      .slice(0, 4)
+      .map((teaching) => [
+        teaching.type,
+        teaching.title,
+        teaching.content.slice(0, 180),
+        teaching.tags.slice(0, 4)
+      ]),
+    automationRecipes: (payload.automationRecipes || [])
+      .filter((recipe) => recipe.enabled)
+      .slice(0, 2)
+      .map((recipe) => [
+        recipe.title,
+        recipe.trigger.type,
+        recipe.actions
+          .filter((action) => action.enabled)
+          .slice(0, 3)
+          .map((action) => [action.type, action.label, action.desktopOnly])
+      ]),
+    history: payload.conversation?.messages
+      .filter((message) => message.role !== "system")
+      .slice(-2)
+      .map((message) => [message.role, message.content.slice(0, 360)])
+  };
+
+  return createHash("sha256").update(JSON.stringify(compactPayload)).digest("hex");
+}
+
+function explainPaidApiBlock(params: {
+  hasKey: boolean;
+  paidProviderEnabled: boolean;
+  allowPaidApiCalls: boolean;
+  monthlyLimit: number;
+  clientMonthCount: number;
+  serverMonthCount: number;
+}): string {
+  if (!params.allowPaidApiCalls) {
+    return "Paid API calls are disabled in Heather settings.";
+  }
+
+  if (!params.paidProviderEnabled) {
+    return "HEATHER_ALLOW_PAID_API is not true, so paid providers are blocked.";
+  }
+
+  if (!params.hasKey) {
+    return "OPENAI_API_KEY is missing.";
+  }
+
+  if (params.monthlyLimit <= 0) {
+    return "Monthly paid API limit is 0.";
+  }
+
+  if (params.clientMonthCount >= params.monthlyLimit || params.serverMonthCount >= params.monthlyLimit) {
+    return "Monthly paid API limit reached.";
+  }
+
+  return "Paid API call skipped by cost-control policy.";
 }

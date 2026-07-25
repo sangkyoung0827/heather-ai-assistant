@@ -4,9 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   BrainCircuit,
-  Cpu,
+  Command,
   Database,
   FolderKanban,
   Home,
@@ -16,8 +15,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  Users,
-  Zap
+  Users
 } from "lucide-react";
 import { PLATFORM_CAPABILITIES } from "@heather/core";
 import { useHeatherData } from "../../lib/use-heather-data";
@@ -43,10 +41,26 @@ export type HeatherView =
   | "analysis"
   | "settings";
 
-interface NavigationItem {
-  id: HeatherView;
+type NeuralNodeId =
+  | "dashboard"
+  | "direct"
+  | "chat"
+  | "memory"
+  | "personal_memory"
+  | "research_memory"
+  | "researcher"
+  | "research_materials"
+  | "research_records";
+
+interface NeuralNode {
+  id: NeuralNodeId;
   label: string;
+  detail: string;
   icon: LucideIcon;
+  view: HeatherView;
+  x: number;
+  y: number;
+  branch?: "memory" | "researcher";
 }
 
 type TauriEventWindow = Window & {
@@ -57,21 +71,119 @@ type TauriEventWindow = Window & {
   };
 };
 
-const NAVIGATION: NavigationItem[] = [
-  { id: "briefing", label: "브리핑", icon: Home },
-  { id: "chat", label: "채팅", icon: MessageSquare },
-  { id: "projects", label: "프로젝트", icon: FolderKanban },
-  { id: "memory", label: "메모리", icon: Database },
-  { id: "automation", label: "Jarvis 루틴", icon: Zap },
-  { id: "local_control", label: "Local Control", icon: Laptop },
-  { id: "training", label: "학습/생성", icon: Sparkles },
-  { id: "analysis", label: "사람/조직 분석", icon: Users },
-  { id: "settings", label: "설정", icon: Settings }
+const CORE_POINT = { x: 500, y: 302 };
+
+const PRIMARY_NODES: NeuralNode[] = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    detail: "today and system overview",
+    icon: Home,
+    view: "briefing",
+    x: 500,
+    y: 72
+  },
+  {
+    id: "direct",
+    label: "Direct Command Registration",
+    detail: "safe local actions",
+    icon: Command,
+    view: "automation",
+    x: 182,
+    y: 302
+  },
+  {
+    id: "chat",
+    label: "Chat",
+    detail: "conversation layer",
+    icon: MessageSquare,
+    view: "chat",
+    x: 818,
+    y: 302
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    detail: "personal context",
+    icon: Database,
+    view: "memory",
+    x: 500,
+    y: 446,
+    branch: "memory"
+  },
+  {
+    id: "researcher",
+    label: "Researcher",
+    detail: "materials and records",
+    icon: BrainCircuit,
+    view: "analysis",
+    x: 500,
+    y: 560,
+    branch: "researcher"
+  }
 ];
+
+const MEMORY_CHILD_NODES: NeuralNode[] = [
+  {
+    id: "personal_memory",
+    label: "Personal Memory",
+    detail: "private recall",
+    icon: Database,
+    view: "memory",
+    x: 285,
+    y: 446
+  },
+  {
+    id: "research_memory",
+    label: "Research Memory",
+    detail: "research context",
+    icon: FolderKanban,
+    view: "memory",
+    x: 715,
+    y: 446
+  }
+];
+
+const RESEARCH_CHILD_NODES: NeuralNode[] = [
+  {
+    id: "research_materials",
+    label: "Research Material Registration",
+    detail: "teach Heather",
+    icon: Sparkles,
+    view: "training",
+    x: 255,
+    y: 560
+  },
+  {
+    id: "research_records",
+    label: "Research Records",
+    detail: "project archive",
+    icon: FolderKanban,
+    view: "projects",
+    x: 745,
+    y: 560
+  }
+];
+
+const ALL_GRAPH_NODES = [...PRIMARY_NODES, ...MEMORY_CHILD_NODES, ...RESEARCH_CHILD_NODES];
+
+function nodeForView(view: HeatherView): NeuralNodeId {
+  if (view === "briefing") return "dashboard";
+  if (view === "chat") return "chat";
+  if (view === "memory") return "memory";
+  if (view === "training") return "research_materials";
+  if (view === "projects") return "research_records";
+  if (view === "analysis") return "researcher";
+  if (view === "automation" || view === "local_control") return "direct";
+  return "dashboard";
+}
 
 export function HeatherWorkspace() {
   const data = useHeatherData();
   const [activeView, setActiveView] = useState<HeatherView>("briefing");
+  const [activeNode, setActiveNode] = useState<NeuralNodeId>("dashboard");
+  const [memoryExpanded, setMemoryExpanded] = useState(false);
+  const [researcherExpanded, setResearcherExpanded] = useState(false);
 
   useEffect(() => {
     registerHeatherServiceWorker();
@@ -85,7 +197,7 @@ export function HeatherWorkspace() {
     let unlisten: (() => void) | null = null;
     void listen<string>("heather://open-view", (event) => {
       if (event.payload === "local_control" || event.payload === "settings" || event.payload === "chat") {
-        setActiveView(event.payload);
+        activateView(event.payload, nodeForView(event.payload));
       }
     }).then((nextUnlisten) => {
       unlisten = nextUnlisten;
@@ -101,96 +213,134 @@ export function HeatherWorkspace() {
     [data.projects]
   );
 
+  const activeMemoryCount = data.memories.filter((memory) => !memory.archived).length;
+  const activeTeachingCount = data.teachings.filter((teaching) => teaching.active).length;
   const availableCapabilities = PLATFORM_CAPABILITIES.filter(
     (capability) => capability.status === "available"
   ).length;
-  const activeLabel = NAVIGATION.find((item) => item.id === activeView)?.label || "브리핑";
+  const activeLabel = ALL_GRAPH_NODES.find((item) => item.id === activeNode)?.label || "Dashboard";
+
+  function activateView(view: HeatherView, nodeId: NeuralNodeId) {
+    setActiveView(view);
+    setActiveNode(nodeId);
+    if (nodeId === "memory" || nodeId === "personal_memory" || nodeId === "research_memory") {
+      setMemoryExpanded(true);
+    }
+    if (nodeId === "researcher" || nodeId === "research_materials" || nodeId === "research_records") {
+      setResearcherExpanded(true);
+    }
+  }
+
+  function activateNode(node: NeuralNode) {
+    if (node.branch === "memory") {
+      setMemoryExpanded((expanded) => !expanded);
+    }
+    if (node.branch === "researcher") {
+      setResearcherExpanded((expanded) => !expanded);
+    }
+    activateView(node.view, node.id);
+  }
 
   return (
-    <main className="heather-hud min-h-screen overflow-hidden bg-[#01060d] text-cyan-50">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1740px] flex-col gap-4 p-3 lg:flex-row lg:p-4">
-        <aside className="hud-sidebar flex shrink-0 flex-col gap-4 p-4 lg:h-[calc(100vh-2rem)] lg:w-[300px]">
-          <div className="hud-profile flex items-center gap-3 pb-4">
-            <div className="hud-avatar-shell">
-              <Image src="/icons/heather-avatar.png" alt="" width={86} height={86} className="hud-avatar-img" unoptimized />
-            </div>
+    <main className="heather-hud min-h-screen overflow-hidden">
+      <div className="heather-os-shell mx-auto flex min-h-screen w-full max-w-[1500px] flex-col px-4 py-4 sm:px-6 lg:px-8">
+        <header className="heather-os-header">
+          <div>
+            <p className="heather-os-kicker">Heather AI Operating System</p>
+            <h1>Neural Interface</h1>
+          </div>
+          <div className="heather-os-utilities" aria-label="System utilities">
+            <button type="button" onClick={() => activateView("local_control", "direct")}>
+              <Laptop className="h-4 w-4" />
+              Local Control
+            </button>
+            <button type="button" onClick={() => activateView("settings", "dashboard")}>
+              <Settings className="h-4 w-4" />
+              Settings
+            </button>
+          </div>
+        </header>
+
+        <section className="neural-interface" aria-label="Heather neural navigation">
+          <NeuralLines memoryExpanded={memoryExpanded} researcherExpanded={researcherExpanded} />
+
+          <button
+            type="button"
+            className="neural-core"
+            onClick={() => activateView("briefing", "dashboard")}
+            aria-label="Open Dashboard"
+          >
+            <span className="neural-core-ring" aria-hidden="true" />
+            <span className="neural-core-image">
+              <Image
+                src="/icons/heather-avatar.png"
+                alt=""
+                width={112}
+                height={112}
+                priority
+                unoptimized
+              />
+            </span>
+            <span className="neural-core-label">Heather</span>
+          </button>
+
+          {PRIMARY_NODES.map((node) => (
+            <NeuralNodeButton
+              key={node.id}
+              node={node}
+              active={activeNode === node.id}
+              visible
+              expanded={
+                (node.branch === "memory" && memoryExpanded) ||
+                (node.branch === "researcher" && researcherExpanded)
+              }
+              onClick={() => activateNode(node)}
+            />
+          ))}
+
+          {MEMORY_CHILD_NODES.map((node) => (
+            <NeuralNodeButton
+              key={node.id}
+              node={node}
+              active={activeNode === node.id}
+              visible={memoryExpanded}
+              onClick={() => activateView(node.view, node.id)}
+            />
+          ))}
+
+          {RESEARCH_CHILD_NODES.map((node) => (
+            <NeuralNodeButton
+              key={node.id}
+              node={node}
+              active={activeNode === node.id}
+              visible={researcherExpanded}
+              onClick={() => activateView(node.view, node.id)}
+            />
+          ))}
+        </section>
+
+        <section className="heather-os-status" aria-label="Heather status">
+          <StatusPill icon={BrainCircuit} label={data.settings.tone} value="Tone" />
+          <StatusPill icon={Mic} label={data.settings.voiceOutputEnabled ? "on" : "off"} value="Voice" />
+          <StatusPill icon={ShieldCheck} label="confirm" value="Risk" />
+          <StatusPill icon={Database} label={String(activeMemoryCount)} value="Memory" />
+          <StatusPill icon={Sparkles} label={String(activeTeachingCount)} value="Teaching" />
+          <StatusPill icon={FolderKanban} label={String(activeProjectCount)} value="Projects" />
+          <StatusPill icon={Laptop} label={String(availableCapabilities)} value="Tools" />
+        </section>
+
+        <section className="heather-os-workspace" aria-live="polite">
+          <div className="heather-os-workspace-head">
             <div>
-              <p className="text-sm font-semibold text-cyan-200">Heather AI Assistant</p>
-              <h1 className="text-2xl font-semibold tracking-normal text-white">헤더</h1>
+              <p>Selected node</p>
+              <h2>{activeLabel}</h2>
             </div>
+            <span>{data.ready ? "Ready" : "Loading"}</span>
           </div>
 
-          <nav className="grid grid-cols-3 gap-2 lg:grid-cols-1">
-            {NAVIGATION.map((item) => {
-              const Icon = item.icon;
-              const selected = activeView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveView(item.id)}
-                  className={`hud-nav-item flex min-h-12 items-center justify-center gap-3 px-3 text-sm font-medium transition lg:justify-start ${
-                    selected
-                      ? "hud-nav-item-active text-white"
-                      : "text-cyan-100/70 hover:text-white"
-                  }`}
-                  title={item.label}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="hidden sm:inline lg:inline">{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="hud-mini-panel mt-auto hidden space-y-3 p-4 text-sm text-cyan-100/75 lg:block">
-            <div className="flex items-center justify-between">
-              <span>진행 프로젝트</span>
-              <strong className="text-white">{activeProjectCount}</strong>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>저장 기억</span>
-              <strong className="text-white">{data.memories.filter((memory) => !memory.archived).length}</strong>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>교육 기록</span>
-              <strong className="text-white">{data.teachings.filter((teaching) => teaching.active).length}</strong>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>자동화 루틴</span>
-              <strong className="text-white">{data.automationRecipes.filter((recipe) => recipe.enabled).length}</strong>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>웹 기능</span>
-              <strong className="text-white">{availableCapabilities}</strong>
-            </div>
-          </div>
-
-          <div className="hud-system-status hidden p-4 lg:block">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/70">System Status</p>
-            <p className="mt-2 text-sm font-semibold text-cyan-200">ONLINE</p>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-cyan-950">
-              <div className="h-full w-[86%] bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.95)]" />
-            </div>
-          </div>
-        </aside>
-
-        <section className="hud-main-panel flex min-w-0 flex-1 flex-col lg:h-[calc(100vh-2rem)] lg:overflow-hidden">
-          <header className="hud-topbar flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-cyan-200">오늘은 무엇을 도와주면 좋을까?</p>
-              <h2 className="mt-1 text-3xl font-semibold text-white">{activeLabel}</h2>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-sm">
-              <StatusPill icon={BrainCircuit} label={data.settings.tone} value="말투" />
-              <StatusPill icon={Mic} label={data.settings.voiceOutputEnabled ? "on" : "off"} value="음성" />
-              <StatusPill icon={ShieldCheck} label="confirm" value="위험 작업" />
-            </div>
-          </header>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 heather-scrollbar md:p-5">
+          <div key={activeView} className="neural-view-stage">
             {!data.ready ? (
-              <div className="flex min-h-[360px] items-center justify-center text-sm text-cyan-100/70">
+              <div className="flex min-h-[300px] items-center justify-center text-sm text-slate-500">
                 Heather 작업공간을 불러오는 중입니다.
               </div>
             ) : (
@@ -200,7 +350,7 @@ export function HeatherWorkspace() {
                     conversations={data.conversations}
                     memories={data.memories}
                     projects={data.projects}
-                    onOpenView={setActiveView}
+                    onOpenView={(view) => activateView(view, nodeForView(view))}
                   />
                 )}
                 {activeView === "chat" && (
@@ -267,39 +417,68 @@ export function HeatherWorkspace() {
             )}
           </div>
         </section>
-
-        <aside className="hud-right-rail hidden shrink-0 flex-col gap-5 p-4 2xl:flex 2xl:h-[calc(100vh-2rem)] 2xl:w-[178px]">
-          <div className="hud-clock">
-            <p className="font-mono text-lg text-cyan-100">19:40:21</p>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-300/70">Local Core</p>
-          </div>
-
-          <div className="hud-core-orb" aria-hidden="true" />
-
-          <div>
-            <p className="text-xs uppercase tracking-[0.16em] text-cyan-200/60">AI Core</p>
-            <p className="mt-1 text-sm font-semibold text-cyan-300">ACTIVE</p>
-            <div className="hud-equalizer mt-3" aria-hidden="true">
-              {Array.from({ length: 26 }).map((_, index) => (
-                <span key={index} />
-              ))}
-            </div>
-          </div>
-
-          <div className="hud-rail-metric">
-            <Activity className="h-4 w-4 text-cyan-300" />
-            <p className="mt-2 text-xs uppercase tracking-[0.14em] text-cyan-200/60">Neural Network</p>
-            <p className="mt-1 font-mono text-2xl text-cyan-100">98.7%</p>
-          </div>
-
-          <div className="hud-rail-metric mt-auto">
-            <Cpu className="h-4 w-4 text-cyan-300" />
-            <p className="mt-2 text-xs uppercase tracking-[0.14em] text-cyan-200/60">Bridge</p>
-            <p className="mt-1 text-sm font-semibold text-cyan-100">TAURI READY</p>
-          </div>
-        </aside>
       </div>
     </main>
+  );
+}
+
+function NeuralLines({
+  memoryExpanded,
+  researcherExpanded
+}: {
+  memoryExpanded: boolean;
+  researcherExpanded: boolean;
+}) {
+  return (
+    <svg className="neural-lines" viewBox="0 0 1000 640" aria-hidden="true">
+      <line x1={CORE_POINT.x} y1={CORE_POINT.y} x2="500" y2="72" />
+      <line x1={CORE_POINT.x} y1={CORE_POINT.y} x2="182" y2="302" />
+      <line x1={CORE_POINT.x} y1={CORE_POINT.y} x2="818" y2="302" />
+      <line x1={CORE_POINT.x} y1={CORE_POINT.y} x2="500" y2="446" />
+      <line x1="500" y1="446" x2="500" y2="560" />
+      <line className={memoryExpanded ? "is-visible" : ""} x1="500" y1="446" x2="285" y2="446" />
+      <line className={memoryExpanded ? "is-visible" : ""} x1="500" y1="446" x2="715" y2="446" />
+      <line className={researcherExpanded ? "is-visible" : ""} x1="500" y1="560" x2="255" y2="560" />
+      <line className={researcherExpanded ? "is-visible" : ""} x1="500" y1="560" x2="745" y2="560" />
+    </svg>
+  );
+}
+
+function NeuralNodeButton({
+  node,
+  active,
+  visible,
+  expanded,
+  onClick
+}: {
+  node: NeuralNode;
+  active: boolean;
+  visible: boolean;
+  expanded?: boolean;
+  onClick: () => void;
+}) {
+  const Icon = node.icon;
+  return (
+    <button
+      type="button"
+      aria-expanded={node.branch ? Boolean(expanded) : undefined}
+      aria-hidden={!visible}
+      tabIndex={visible ? 0 : -1}
+      onClick={onClick}
+      className={`neural-node ${active ? "is-active" : ""} ${visible ? "is-visible" : "is-hidden"}`}
+      style={{
+        left: `${node.x / 10}%`,
+        top: `${node.y / 6.4}%`
+      }}
+    >
+      <span className="neural-node-dot">
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="neural-node-copy">
+        <strong>{node.label}</strong>
+        <small>{node.detail}</small>
+      </span>
+    </button>
   );
 }
 
@@ -313,10 +492,10 @@ function StatusPill({
   value: string;
 }) {
   return (
-    <div className="hud-status-chip flex min-w-0 items-center gap-3 px-3 py-2">
-      <Icon className="h-4 w-4 shrink-0 text-cyan-300" />
-      <span className="hidden text-cyan-100/55 sm:inline">{value}</span>
-      <strong className="truncate text-white">{label}</strong>
+    <div className="heather-os-pill">
+      <Icon className="h-4 w-4 shrink-0" />
+      <span>{value}</span>
+      <strong>{label}</strong>
     </div>
   );
 }

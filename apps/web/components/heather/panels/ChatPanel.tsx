@@ -31,7 +31,7 @@ import type {
   TeachingRecord
 } from "@heather/core";
 import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
-import type { MediaActionResult } from "@heather/platform";
+import type { DesktopActionResult, MediaActionResult } from "@heather/platform";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -53,6 +53,25 @@ interface ApiChatResponse extends ChatResponsePayload {
   cached?: boolean;
   meteredApiCall?: boolean;
   error?: string;
+}
+
+type FastDesktopActionName =
+  | "open_app"
+  | "open_url"
+  | "search_web"
+  | "search_youtube"
+  | "search_youtube_music"
+  | "play_youtube_music"
+  | "speak_macos"
+  | "stop_speaking";
+
+interface FastDesktopAction {
+  name: FastDesktopActionName;
+  description: string;
+  target: string;
+  riskLevel: "low" | "medium" | "high";
+  requiresConfirmation: boolean;
+  args: Record<string, unknown>;
 }
 
 interface SpeechRecognitionResultLike {
@@ -172,7 +191,7 @@ export function ChatPanel({
     sendLockRef.current = true;
     setDraft("");
     setIsSending(true);
-    setProviderStatus("헤더가 맥락을 확인하는 중");
+    setProviderStatus("빠른 명령 확인 중");
 
     const baseConversation = activeConversation || createConversation();
     const userMessage = createMessage("user", message, inputSource);
@@ -196,7 +215,11 @@ export function ChatPanel({
         teachings,
         automationRecipes
       };
-      const data = (await resolveImmediateDesktopAction(message)) || (await resolveHeatherResponse(payload));
+      const fastResponse = await resolveFastCommand(message, baseConversation);
+      if (!fastResponse) {
+        setProviderStatus("Ollama 응답 대기 중");
+      }
+      const data = fastResponse || (await resolveHeatherResponse(payload));
 
       const assistantMessage = createMessage("assistant", data.message, "text", {
         provider: data.provider,
@@ -217,6 +240,15 @@ export function ChatPanel({
 
       if (data.meteredApiCall) {
         await onSaveSettings(incrementPaidApiCount(settings));
+      }
+
+      if (
+        payload.settings.cacheResponses &&
+        !data.cached &&
+        data.provider !== "desktop" &&
+        !asksCurrentProviderOrModel(message)
+      ) {
+        writeCachedResponse(payload, data);
       }
 
       if (data.memorySuggestion && settings.memoryEnabled && !data.cached) {
@@ -281,28 +313,69 @@ export function ChatPanel({
     return data;
   }
 
-  async function resolveImmediateDesktopAction(message: string): Promise<ApiChatResponse | null> {
-    if (!isTauriRuntime()) return null;
-
-    const musicQuery = extractYouTubeMusicPlayQuery(message);
-    if (musicQuery) {
-      const result = await invokeTauriCommand<MediaActionResult>("play_youtube_music", {
-        query: musicQuery
-      });
+  async function resolveFastCommand(
+    message: string,
+    previousConversation: Conversation
+  ): Promise<ApiChatResponse | null> {
+    if (asksCurrentProviderOrModel(message)) {
+      const model = settings.ollamaModel || "gemma4:latest";
       return {
-        message: result.message,
+        message: `현재 사용 중인 모델은 ${model}입니다. provider는 ollama입니다.`,
         title: generateConversationTitle(message),
         risk: {
           level: "low",
           requiresConfirmation: false,
-          reason: "허용된 YouTube Music 데스크톱 액션입니다."
+          reason: "런타임 메타데이터 조회입니다."
         },
-        provider: "desktop",
-        model: "tauri-action"
+        provider: "ollama",
+        model
       };
     }
 
-    return null;
+    if (isForbiddenDesktopRequest(message)) {
+      return {
+        message:
+          "이 작업은 Heather 안전 정책상 실행할 수 없습니다. 파일 삭제/이동/덮어쓰기, 결제/구매, 비밀번호/토큰 접근, 주식 거래, 임의 shell command 실행은 차단됩니다.",
+        title: generateConversationTitle(message),
+        risk: {
+          level: "high",
+          requiresConfirmation: true,
+          reason: "금지된 작업 범주입니다."
+        },
+        provider: "desktop",
+        model: "blocked-action"
+      };
+    }
+
+    const action = planFastDesktopAction(message, previousConversation);
+    if (!action) return null;
+
+    if (!isTauriRuntime()) {
+      return {
+        message: `작업 제안: ${action.description}\n대상: ${action.target}\n위험도: ${action.riskLevel}\n\n이 기능은 Heather 데스크톱 앱에서 사용할 수 있습니다.`,
+        title: generateConversationTitle(message),
+        risk: {
+          level: action.riskLevel,
+          requiresConfirmation: action.requiresConfirmation,
+          reason: "데스크톱 브리지가 필요한 기능입니다."
+        },
+        provider: "desktop",
+        model: "not-connected"
+      };
+    }
+
+    const result = await runFastDesktopAction(action);
+    return {
+      message: formatActionResponse(action, result),
+      title: generateConversationTitle(message),
+      risk: {
+        level: action.riskLevel,
+        requiresConfirmation: action.requiresConfirmation,
+        reason: "허용된 데스크톱 action입니다."
+      },
+      provider: "desktop",
+      model: "tauri-action"
+    };
   }
 
   async function requestHeatherApi(payload: ChatRequestPayload): Promise<ApiChatResponse> {
@@ -673,6 +746,225 @@ function writeCachedResponse(payload: ChatRequestPayload, data: ApiChatResponse)
   );
 }
 
+function planFastDesktopAction(message: string, conversation: Conversation): FastDesktopAction | null {
+  const trimmed = message.trim();
+  const normalized = trimmed.toLowerCase();
+
+  if (/말\s*멈춰|그만\s*말|읽기\s*중지|음성\s*중지|stop\s*(speaking|talking|tts)?/i.test(trimmed)) {
+    return {
+      name: "stop_speaking",
+      description: "macOS 음성 읽기를 중지합니다.",
+      target: "macOS speech",
+      riskLevel: "low",
+      requiresConfirmation: false,
+      args: {}
+    };
+  }
+
+  if (/(이\s*)?(답변|메시지).*(읽어|읽어줘|말해|들려)|read\s+(this|answer|message)/i.test(trimmed)) {
+    const lastAssistantMessage = findLastAssistantMessage(conversation);
+    return {
+      name: "speak_macos",
+      description: "직전 Heather 답변을 macOS 음성으로 읽습니다.",
+      target: "last assistant message",
+      riskLevel: "low",
+      requiresConfirmation: false,
+      args: {
+        text: lastAssistantMessage?.content || "읽을 직전 답변이 없습니다.",
+        rate: 190
+      }
+    };
+  }
+
+  const explicitUrl = trimmed.match(/https?:\/\/[^\s)"'<>]+/)?.[0];
+  if (explicitUrl && /열어|열어줘|open|go\s*to|visit/i.test(trimmed)) {
+    return {
+      name: "open_url",
+      description: "http/https 링크를 기본 브라우저로 엽니다.",
+      target: explicitUrl,
+      riskLevel: "low",
+      requiresConfirmation: false,
+      args: { url: explicitUrl }
+    };
+  }
+
+  const appName = extractAllowedAppName(trimmed);
+  if (appName && /열어|열어줘|실행|켜줘|켜|open|launch|start/i.test(trimmed)) {
+    return {
+      name: "open_app",
+      description: "허용 목록에 있는 앱을 엽니다.",
+      target: appName,
+      riskLevel: "low",
+      requiresConfirmation: false,
+      args: { appName }
+    };
+  }
+
+  if (/유튜브\s*뮤직|youtube\s*music/i.test(trimmed)) {
+    const query = extractSearchQuery(trimmed, /유튜브\s*뮤직|youtube\s*music/gi);
+    if (!query) return null;
+
+    if (/재생|틀어|들려|play/i.test(normalized)) {
+      return {
+        name: "play_youtube_music",
+        description: "YouTube Music에서 검색 후 재생을 시도합니다.",
+        target: query,
+        riskLevel: "low",
+        requiresConfirmation: false,
+        args: { query }
+      };
+    }
+
+    if (/검색|찾아|search/i.test(normalized)) {
+      return {
+        name: "search_youtube_music",
+        description: "YouTube Music 검색 페이지를 엽니다.",
+        target: query,
+        riskLevel: "low",
+        requiresConfirmation: false,
+        args: { query }
+      };
+    }
+  }
+
+  if (/유튜브|youtube/i.test(trimmed) && /검색|찾아|search/i.test(trimmed)) {
+    const query = extractSearchQuery(trimmed, /유튜브|youtube/gi);
+    if (query) {
+      return {
+        name: "search_youtube",
+        description: "YouTube 검색 페이지를 엽니다.",
+        target: query,
+        riskLevel: "low",
+        requiresConfirmation: false,
+        args: { query }
+      };
+    }
+  }
+
+  if (/구글|google/i.test(trimmed) && /검색|찾아|search/i.test(trimmed)) {
+    const query = extractSearchQuery(trimmed, /구글|google/gi);
+    if (query) {
+      return {
+        name: "search_web",
+        description: "Google 검색 페이지를 엽니다.",
+        target: query,
+        riskLevel: "low",
+        requiresConfirmation: false,
+        args: { query }
+      };
+    }
+  }
+
+  return null;
+}
+
+async function runFastDesktopAction(action: FastDesktopAction): Promise<DesktopActionResult> {
+  if (action.name === "open_app") {
+    return invokeTauriCommand<DesktopActionResult>("open_app", {
+      appName: String(action.args.appName || "")
+    });
+  }
+
+  if (action.name === "open_url") {
+    return invokeTauriCommand<DesktopActionResult>("open_url", {
+      url: String(action.args.url || "")
+    });
+  }
+
+  if (action.name === "search_web") {
+    return invokeTauriCommand<DesktopActionResult>("search_web", {
+      query: String(action.args.query || "")
+    });
+  }
+
+  if (action.name === "search_youtube") {
+    return invokeTauriCommand<DesktopActionResult>("search_youtube", {
+      query: String(action.args.query || "")
+    });
+  }
+
+  if (action.name === "search_youtube_music") {
+    return invokeTauriCommand<DesktopActionResult>("search_youtube_music", {
+      query: String(action.args.query || "")
+    });
+  }
+
+  if (action.name === "play_youtube_music") {
+    const result = await invokeTauriCommand<MediaActionResult>("play_youtube_music", {
+      query: String(action.args.query || "")
+    });
+    return {
+      actionName: "play_youtube_music",
+      target: result.query,
+      url: result.url,
+      message: result.message
+    };
+  }
+
+  if (action.name === "speak_macos") {
+    return invokeTauriCommand<DesktopActionResult>("speak_macos", {
+      text: String(action.args.text || ""),
+      rate: Number(action.args.rate || 190)
+    });
+  }
+
+  return invokeTauriCommand<DesktopActionResult>("stop_speaking");
+}
+
+function formatActionResponse(action: FastDesktopAction, result: DesktopActionResult): string {
+  return [
+    `작업 제안: ${action.description}`,
+    `대상: ${action.target}`,
+    `위험도: ${action.riskLevel}`,
+    "",
+    `실행 결과: ${result.message}`
+  ].join("\n");
+}
+
+function findLastAssistantMessage(conversation: Conversation): Conversation["messages"][number] | null {
+  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+    const message = conversation.messages[index];
+    if (message.role === "assistant") return message;
+  }
+
+  return null;
+}
+
+function extractAllowedAppName(message: string): string | null {
+  const appMap: Array<[RegExp, string]> = [
+    [/google\s*chrome|chrome|크롬|구글\s*크롬/i, "Google Chrome"],
+    [/safari|사파리/i, "Safari"],
+    [/finder|파인더/i, "Finder"],
+    [/cursor|커서/i, "Cursor"],
+    [/vs\s*code|vscode|visual\s*studio\s*code/i, "VS Code"],
+    [/notes|메모장|메모/i, "Notes"],
+    [/calendar|캘린더|달력/i, "Calendar"],
+    [/music|음악|뮤직/i, "Music"],
+    [/zoom|줌/i, "Zoom"],
+    [/capcut|캡컷/i, "CapCut"]
+  ];
+
+  return appMap.find(([pattern]) => pattern.test(message))?.[1] || null;
+}
+
+function extractSearchQuery(message: string, servicePattern: RegExp): string {
+  return message
+    .replace(/^\s*헤더[,\s]*/i, "")
+    .replace(servicePattern, "")
+    .replace(/에서|으로|로|에|좀|please/gi, " ")
+    .replace(/검색해줘|검색해 줘|검색|찾아줘|찾아 줘|찾아|search|열어줘|열어/gi, " ")
+    .replace(/재생해줘|재생해 줘|재생|틀어줘|틀어 줘|틀어|들려줘|들려 줘|들려|play/gi, " ")
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+    .slice(0, 160);
+}
+
+function isForbiddenDesktopRequest(message: string): boolean {
+  return /파일\s*(삭제|이동|덮어쓰기)|delete\s+file|move\s+folder|overwrite|shell|터미널.*명령|결제|구매|송금|은행|bank|password|비밀번호|token|토큰|cookie|쿠키|주식|stock\s*trading|trade\s*stock/i.test(
+    message
+  );
+}
+
 function asksCurrentProviderOrModel(message: string): boolean {
   const normalized = message.toLowerCase();
   const asksRuntime =
@@ -684,23 +976,6 @@ function asksCurrentProviderOrModel(message: string): boolean {
   return asksCurrent && asksRuntime;
 }
 
-function extractYouTubeMusicPlayQuery(message: string): string | null {
-  const normalized = message.toLowerCase();
-  const asksYouTubeMusic = /유튜브\s*뮤직|youtube\s*music/.test(normalized);
-  const asksPlayback = /재생|틀어|들려|play/.test(normalized);
-  if (!asksYouTubeMusic || !asksPlayback) return null;
-
-  const query = message
-    .replace(/^\s*헤더[,\s]*/i, "")
-    .replace(/유튜브\s*뮤직(에서|으로)?/gi, "")
-    .replace(/youtube\s*music/gi, "")
-    .replace(/재생해줘|재생해 줘|재생|틀어줘|틀어 줘|틀어|들려줘|들려 줘|들려|play/gi, "")
-    .trim()
-    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
-
-  return query || null;
-}
-
 function cacheKey(payload: ChatRequestPayload): string {
   const compact = JSON.stringify({
     message: payload.message.trim().toLowerCase(),
@@ -710,30 +985,30 @@ function cacheKey(payload: ChatRequestPayload): string {
     ollamaModel: payload.settings.ollamaModel,
     memories: payload.memories
       .filter((memory) => !memory.archived)
-      .slice(0, 6)
-      .map((memory) => [memory.type, memory.content.slice(0, 180), memory.tags]),
+      .slice(0, 4)
+      .map((memory) => [memory.type, memory.content.slice(0, 160), memory.tags.slice(0, 4)]),
     projects: payload.projects
-      .slice(0, 6)
-      .map((project) => [project.title, project.status, project.priority, project.next_actions.slice(0, 4)]),
+      .slice(0, 4)
+      .map((project) => [project.title, project.status, project.priority, project.next_actions.slice(0, 3)]),
     teachings: (payload.teachings || [])
       .filter((teaching) => teaching.active)
-      .slice(0, 6)
-      .map((teaching) => [teaching.type, teaching.title, teaching.content.slice(0, 180), teaching.tags]),
+      .slice(0, 4)
+      .map((teaching) => [teaching.type, teaching.title, teaching.content.slice(0, 160), teaching.tags.slice(0, 4)]),
     automationRecipes: (payload.automationRecipes || [])
       .filter((recipe) => recipe.enabled)
-      .slice(0, 4)
+      .slice(0, 2)
       .map((recipe) => [
         recipe.title,
         recipe.trigger.type,
         recipe.actions
           .filter((action) => action.enabled)
-          .slice(0, 5)
+          .slice(0, 3)
           .map((action) => [action.type, action.label, action.desktopOnly])
       ]),
     history: payload.conversation?.messages
       .filter((message) => message.role !== "system")
-      .slice(-4)
-      .map((message) => [message.role, message.content.slice(0, 360)])
+      .slice(-2)
+      .map((message) => [message.role, message.content.slice(0, 300)])
   });
 
   return `heather.ai.chat-cache.${hashString(compact)}`;

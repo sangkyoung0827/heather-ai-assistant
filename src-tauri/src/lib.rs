@@ -6,7 +6,7 @@ use std::{
     io::{Read, Write},
     net::TcpStream,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -38,13 +38,14 @@ const APP_ALLOWLIST: &[(&str, &str)] = &[
     ("Calendar", "Calendar"),
     ("Music", "Music"),
     ("Zoom", "zoom.us"),
-    ("Terminal", "Terminal"),
+    ("CapCut", "CapCut"),
 ];
 
 #[derive(Default)]
 struct DesktopState {
     allowed_dirs: Mutex<HashMap<String, PathBuf>>,
     file_registry: Mutex<HashMap<String, PathBuf>>,
+    speech_process: Mutex<Option<Child>>,
 }
 
 #[derive(Serialize)]
@@ -126,6 +127,15 @@ struct MediaActionResult {
     query: String,
     url: String,
     attempted_autoplay: bool,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopActionResult {
+    action_name: String,
+    target: String,
+    url: Option<String>,
     message: String,
 }
 
@@ -290,23 +300,24 @@ fn read_text_file(file_id: String, state: State<DesktopState>) -> Result<TextFil
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    let lower = url.to_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
-        return Err("Only http/https URLs are allowed.".to_string());
-    }
-
-    if lower.starts_with("file://")
-        || lower.starts_with("javascript:")
-        || lower.starts_with("data:")
-    {
-        return Err("Unsafe URL scheme is blocked.".to_string());
-    }
-
+    validate_http_url(&url)?;
     open_url_with_system(&url)
 }
 
 #[tauri::command]
-fn open_app(app_name: String) -> Result<(), String> {
+fn open_url(url: String) -> Result<DesktopActionResult, String> {
+    validate_http_url(&url)?;
+    open_url_with_system(&url)?;
+    Ok(DesktopActionResult {
+        action_name: "open_url".to_string(),
+        target: url.clone(),
+        url: Some(url.clone()),
+        message: format!("{url} 링크를 열었습니다."),
+    })
+}
+
+#[tauri::command]
+fn open_app(app_name: String) -> Result<DesktopActionResult, String> {
     let Some((label, system_name)) = APP_ALLOWLIST
         .iter()
         .find(|(label, _)| label.eq_ignore_ascii_case(&app_name))
@@ -314,7 +325,38 @@ fn open_app(app_name: String) -> Result<(), String> {
         return Err("This app is not in Heather's allowlist.".to_string());
     };
 
-    open_allowlisted_app(label, system_name)
+    open_allowlisted_app(label, system_name)?;
+    Ok(DesktopActionResult {
+        action_name: "open_app".to_string(),
+        target: label.to_string(),
+        url: None,
+        message: format!("{label} 앱을 열었습니다."),
+    })
+}
+
+#[tauri::command]
+fn search_web(query: String) -> Result<DesktopActionResult, String> {
+    open_search_url("search_web", "Google", "https://www.google.com/search?q=", query)
+}
+
+#[tauri::command]
+fn search_youtube(query: String) -> Result<DesktopActionResult, String> {
+    open_search_url(
+        "search_youtube",
+        "YouTube",
+        "https://www.youtube.com/results?search_query=",
+        query,
+    )
+}
+
+#[tauri::command]
+fn search_youtube_music(query: String) -> Result<DesktopActionResult, String> {
+    open_search_url(
+        "search_youtube_music",
+        "YouTube Music",
+        "https://music.youtube.com/search?q=",
+        query,
+    )
 }
 
 #[tauri::command]
@@ -342,6 +384,59 @@ fn play_youtube_music(query: String) -> Result<MediaActionResult, String> {
             format!("YouTube Music에서 \"{trimmed_query}\" 재생을 시도했습니다.")
         } else {
             format!("YouTube Music에서 \"{trimmed_query}\" 검색 페이지를 열었습니다. 브라우저 자동 재생 권한이 필요하면 첫 결과를 직접 눌러주세요.")
+        },
+    })
+}
+
+#[tauri::command]
+fn speak_macos(
+    text: String,
+    voice: Option<String>,
+    rate: Option<u32>,
+    state: State<DesktopState>,
+) -> Result<DesktopActionResult, String> {
+    let speech_text = normalize_speech_text(&text)?;
+    stop_speaking_process(&state)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("say");
+        command.arg("-r").arg(rate.unwrap_or(190).clamp(120, 280).to_string());
+        if let Some(voice_name) = normalize_voice_name(voice) {
+            command.arg("-v").arg(voice_name);
+        }
+        command.arg(speech_text.clone());
+        let child = command.spawn().map_err(|error| error.to_string())?;
+        *state
+            .speech_process
+            .lock()
+            .map_err(|_| "Speech process lock failed.".to_string())? = Some(child);
+
+        return Ok(DesktopActionResult {
+            action_name: "speak_macos".to_string(),
+            target: "macOS speech".to_string(),
+            url: None,
+            message: "macOS 음성으로 답변 읽기를 시작했습니다.".to_string(),
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("speak_macos는 macOS 데스크톱 앱에서만 사용할 수 있습니다.".to_string())
+    }
+}
+
+#[tauri::command]
+fn stop_speaking(state: State<DesktopState>) -> Result<DesktopActionResult, String> {
+    let stopped = stop_speaking_process(&state)?;
+    Ok(DesktopActionResult {
+        action_name: "stop_speaking".to_string(),
+        target: "macOS speech".to_string(),
+        url: None,
+        message: if stopped {
+            "음성 읽기를 중지했습니다.".to_string()
+        } else {
+            "중지할 음성 읽기가 없습니다.".to_string()
         },
     })
 }
@@ -412,7 +507,13 @@ fn ollama_chat(payload: Value) -> Result<DesktopChatResponse, String> {
         });
     }
 
-    let response = send_ollama_chat(&base_url, &model, build_ollama_messages(&payload, &message, &model)?)?;
+    let max_tokens = if is_simple_factual_question(&message) { 350 } else { 900 };
+    let response = send_ollama_chat(
+        &base_url,
+        &model,
+        build_ollama_messages(&payload, &message, &model)?,
+        max_tokens,
+    )?;
 
     Ok(DesktopChatResponse {
         message: response
@@ -476,8 +577,14 @@ pub fn run() {
             search_files,
             read_text_file,
             open_external_url,
+            open_url,
             open_app,
+            search_web,
+            search_youtube,
+            search_youtube_music,
             play_youtube_music,
+            speak_macos,
+            stop_speaking,
             get_clipboard_text,
             set_clipboard_text,
             ollama_status,
@@ -597,7 +704,12 @@ fn resolve_ollama_model(models: &[String], requested_model: &str) -> Option<Stri
         .cloned()
 }
 
-fn send_ollama_chat(base_url: &str, model: &str, messages: Vec<Value>) -> Result<Value, String> {
+fn send_ollama_chat(
+    base_url: &str,
+    model: &str,
+    messages: Vec<Value>,
+    max_tokens: u16,
+) -> Result<Value, String> {
     let request_body = json!({
         "model": model,
         "stream": false,
@@ -605,7 +717,7 @@ fn send_ollama_chat(base_url: &str, model: &str, messages: Vec<Value>) -> Result
         "messages": messages,
         "options": {
             "temperature": 0.6,
-            "num_predict": 900
+            "num_predict": max_tokens
         }
     })
     .to_string();
@@ -658,7 +770,7 @@ fn build_ollama_messages(payload: &Value, message: &str, model: &str) -> Result<
         .and_then(|conversation| conversation.get("messages"))
         .and_then(Value::as_array)
     {
-        for item in history.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev() {
+        for item in history.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev() {
             let role = value_string(item, &["role"]).unwrap_or_default();
             let content = value_string(item, &["content"]).unwrap_or_default();
             if role == "system" || content.trim().is_empty() || content.trim() == message.trim() {
@@ -666,7 +778,7 @@ fn build_ollama_messages(payload: &Value, message: &str, model: &str) -> Result<
             }
             messages.push(json!({
                 "role": role,
-                "content": content.chars().take(700).collect::<String>()
+                "content": content.chars().take(500).collect::<String>()
             }));
         }
     }
@@ -687,9 +799,9 @@ fn compact_desktop_context(payload: &Value) -> String {
             items
                 .iter()
                 .filter(|item| !item.get("archived").and_then(Value::as_bool).unwrap_or(false))
-                .take(6)
+                .take(4)
                 .filter_map(|item| value_string(item, &["content"]))
-                .map(|content| format!("- {}", content.chars().take(240).collect::<String>()))
+                .map(|content| format!("- {}", content.chars().take(180).collect::<String>()))
                 .collect::<Vec<_>>()
                 .join("\n")
         })
@@ -702,7 +814,7 @@ fn compact_desktop_context(payload: &Value) -> String {
         .map(|items| {
             items
                 .iter()
-                .take(6)
+                .take(4)
                 .map(|item| {
                     let title = value_string(item, &["title"]).unwrap_or_else(|| "Untitled".to_string());
                     let status = value_string(item, &["status"]).unwrap_or_else(|| "unknown".to_string());
@@ -866,6 +978,27 @@ fn asks_current_provider_or_model(message: &str) -> bool {
         && current_terms.iter().any(|term| normalized.contains(term))
 }
 
+fn is_simple_factual_question(message: &str) -> bool {
+    let normalized = message.trim().to_lowercase();
+    if normalized.chars().count() > 120 {
+        return false;
+    }
+
+    let simple_starters = [
+        "what", "who", "when", "where", "which", "how many", "현재", "지금", "오늘", "언제",
+        "어디", "누구", "무엇", "뭐", "몇",
+    ];
+    let deep_terms = [
+        "분석", "계획", "전략", "비교", "보고서", "초안", "자세히", "상세", "deep",
+        "analyze", "plan", "strategy", "compare",
+    ];
+
+    simple_starters
+        .iter()
+        .any(|term| normalized.starts_with(term))
+        && !deep_terms.iter().any(|term| normalized.contains(term))
+}
+
 fn classify_chat_risk(message: &str) -> ChatRisk {
     let lower = message.to_lowercase();
     if lower.contains("delete")
@@ -924,6 +1057,44 @@ fn value_string(value: &Value, path: &[&str]) -> Option<String> {
     cursor.as_str().map(str::to_string)
 }
 
+fn validate_http_url(url: &str) -> Result<(), String> {
+    let lower = url.to_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err("Only http/https URLs are allowed.".to_string());
+    }
+
+    if lower.starts_with("file://")
+        || lower.starts_with("javascript:")
+        || lower.starts_with("data:")
+    {
+        return Err("Unsafe URL scheme is blocked.".to_string());
+    }
+
+    Ok(())
+}
+
+fn open_search_url(
+    action_name: &str,
+    service: &str,
+    base_url: &str,
+    query: String,
+) -> Result<DesktopActionResult, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("검색어가 필요합니다.".to_string());
+    }
+
+    let url = format!("{base_url}{}", encode_url_component(query));
+    validate_http_url(&url)?;
+    open_url_with_system(&url)?;
+    Ok(DesktopActionResult {
+        action_name: action_name.to_string(),
+        target: query.to_string(),
+        url: Some(url),
+        message: format!("{service}에서 \"{query}\" 검색 페이지를 열었습니다."),
+    })
+}
+
 fn encode_url_component(input: &str) -> String {
     input
         .bytes()
@@ -934,6 +1105,52 @@ fn encode_url_component(input: &str) -> String {
             _ => format!("%{byte:02X}"),
         })
         .collect()
+}
+
+fn normalize_speech_text(text: &str) -> Result<String, String> {
+    let normalized = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(2_000)
+        .collect::<String>();
+
+    if normalized.trim().is_empty() {
+        return Err("읽을 텍스트가 없습니다.".to_string());
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_voice_name(voice: Option<String>) -> Option<String> {
+    voice
+        .map(|value| {
+            value
+                .chars()
+                .filter(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, ' ' | '-' | '_')
+                })
+                .take(64)
+                .collect::<String>()
+                .trim()
+                .to_string()
+        })
+        .filter(|value| !value.is_empty())
+}
+
+fn stop_speaking_process(state: &DesktopState) -> Result<bool, String> {
+    let mut process = state
+        .speech_process
+        .lock()
+        .map_err(|_| "Speech process lock failed.".to_string())?;
+    let Some(mut child) = process.take() else {
+        return Ok(false);
+    };
+
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok(true)
 }
 
 fn try_youtube_music_autoplay(url: &str) -> Result<bool, String> {
@@ -1137,7 +1354,7 @@ fn open_allowlisted_app(_label: &str, system_name: &str) -> Result<(), String> {
             "Calendar" => "outlookcal:",
             "Music" => "mswindowsmusic:",
             "zoom.us" => "Zoom",
-            "Terminal" => "wt",
+            "CapCut" => "CapCut",
             _ => return Err("Unsupported allowlisted app on Windows.".to_string()),
         };
         Command::new(executable)
@@ -1158,7 +1375,7 @@ fn open_allowlisted_app(_label: &str, system_name: &str) -> Result<(), String> {
             "Calendar" => return Err("Calendar is not available on this platform.".to_string()),
             "Music" => return Err("Music is not available on this platform.".to_string()),
             "zoom.us" => ("zoom", None),
-            "Terminal" => ("x-terminal-emulator", None),
+            "CapCut" => ("capcut", None),
             _ => return Err("Unsupported allowlisted app on Linux.".to_string()),
         };
         let mut command = Command::new(executable);

@@ -41,19 +41,19 @@ const DEFAULT_MODEL = "gemma4:latest";
 function compactContext(payload: ChatRequestPayload): string {
   const memories = payload.memories
     .filter((memory) => !memory.archived)
-    .slice(0, 6)
-    .map((memory) => `- ${memory.type}: ${memory.content.slice(0, 240)}`)
+    .slice(0, 4)
+    .map((memory) => `- ${memory.type}: ${memory.content.slice(0, 180)}`)
     .join("\n");
 
   const projects = payload.projects
-    .slice(0, 6)
+    .slice(0, 4)
     .map((project) => `- ${project.title}: ${project.status}/${project.priority}`)
     .join("\n");
 
   const automationRecipes = (payload.automationRecipes || [])
     .filter((recipe) => recipe.enabled)
-    .slice(0, 4)
-    .map((recipe) => describeAutomationRecipe(recipe).slice(0, 420))
+    .slice(0, 2)
+    .map((recipe) => describeAutomationRecipe(recipe).slice(0, 260))
     .join("\n\n");
 
   return [
@@ -189,6 +189,15 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     return asksCurrent && asksRuntime;
   }
 
+  function isSimpleFactualQuestion(message: string): boolean {
+    const normalized = message.trim().toLowerCase();
+    return (
+      normalized.length <= 120 &&
+      /^(what|who|when|where|which|how many|현재|지금|오늘|언제|어디|누구|무엇|뭐|몇)/.test(normalized) &&
+      !/분석|계획|전략|비교|보고서|초안|자세히|상세|deep|analyze|plan|strategy|compare/i.test(normalized)
+    );
+  }
+
   return {
     id: "ollama",
     chat,
@@ -208,10 +217,10 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           const isLastMessage = index === messages.length - 1;
           return !(isLastMessage && message.role === "user" && message.content.trim() === payload.message.trim());
         })
-        .slice(-4)
+        .slice(-2)
         .map((message) => ({
           role: message.role,
-          content: message.content.slice(0, 700)
+          content: message.content.slice(0, 500)
         }));
 
       const model = payload.settings.ollamaModel || defaultModel;
@@ -240,14 +249,14 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
               "응답은 사용자의 질문에 직접 답하고, 불필요한 내부 사고 과정을 쓰지 않는다."
             ].join("\n")
           },
-          { role: "system", content: compactContext(payload).slice(0, 1800) },
+          { role: "system", content: compactContext(payload).slice(0, 1200) },
           ...(history || []),
           { role: "user", content: payload.message }
         ],
         model,
         {
           temperature: 0.6,
-          maxTokens: 900
+          maxTokens: isSimpleFactualQuestion(payload.message) ? 350 : 900
         }
       );
 
