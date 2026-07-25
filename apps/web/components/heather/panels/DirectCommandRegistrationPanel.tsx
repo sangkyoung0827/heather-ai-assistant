@@ -37,7 +37,7 @@ export function DirectCommandRegistrationPanel() {
   function edit(command: DirectCommand) { setEditingId(command.id); setDraft({ title: command.title, canonicalTrigger: command.canonicalTrigger, triggers: command.triggers, response: command.response, enabled: command.enabled, tags: command.tags }); }
   function showError(error: unknown) { setNotice(error instanceof Error ? error.message : "직접명령 요청을 완료하지 못했습니다."); }
 
-  return <div className="direct-workspace">
+  return <><nav className="direct-page-tabs" aria-label="직접명령 메뉴"><a href="/direct-commands" className="is-active">등록된 명령</a><a href="/direct-commands/new">직접명령 추가</a><a href="/direct-commands/bulk-import">대량 등록</a></nav><div className="direct-workspace">
     <section className="direct-library">
       <div className="direct-toolbar">
         <label className="direct-search"><Search className="h-4 w-4" /><input value={search} onChange={(event) => void searchCommands(event.target.value)} placeholder="명령 이름 또는 트리거 검색" /></label>
@@ -68,7 +68,7 @@ export function DirectCommandRegistrationPanel() {
       </form>
       <details className="transfer-details"><summary><Upload className="h-4 w-4" /> JSON 가져오기</summary><textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder="JSON 배열을 붙여넣으세요." /><button type="button" className="workspace-secondary-button" disabled={!importText.trim()} onClick={() => { try { const parsed = JSON.parse(importText) as DirectCommandInput[]; void importCommands(parsed); setImportText(""); } catch { setNotice("올바른 JSON 배열 형식인지 확인하세요."); } }}>가져오기</button></details>
     </aside>
-  </div>;
+  </div></>;
 }
 
 function Field({ label, hint, textarea, value, onChange, placeholder }: { label: string; hint?: string; textarea?: boolean; value: string; onChange: (value: string) => void; placeholder?: string }) { const Component = textarea ? "textarea" : "input"; return <label className="workspace-field"><span>{label}{hint && <small>{hint}</small>}</span><Component value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></label>; }

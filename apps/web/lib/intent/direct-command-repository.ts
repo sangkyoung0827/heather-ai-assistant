@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { findIntentCommandMatch, normalizeIntentText, type IntentCommand } from "./direct-command-engine";
+import { previewBulkImport } from "./bulk-direct-command-import";
 
 export type CommandCreatedBy = "user" | "auto";
 export type DirectCommandRecord = IntentCommand & {
@@ -23,6 +24,7 @@ export type DirectCommandInput = {
 };
 
 export type ImportSummary = { created: number; merged: number; skipped: number; failed: number };
+export type BulkCommitSummary = { created: number; merged: number; duplicate: number; error: number };
 export type StorageStatus = { provider: "supabase" | "local" | "unavailable"; connected: boolean; readable: boolean; writable: boolean };
 
 type QueryPattern = { normalized: string; examples: string[]; count: number; response: string };
@@ -36,7 +38,9 @@ declare global {
 const memory = globalThis.heatherIntentMemory ?? { commands: [], patterns: new Map<string, QueryPattern>() };
 globalThis.heatherIntentMemory = memory;
 
-const MAX_TEXT_LENGTH = 4000;
+const MAX_TITLE_LENGTH = 200;
+const MAX_TRIGGER_LENGTH = 500;
+const MAX_RESPONSE_LENGTH = 10000;
 const MAX_TRIGGERS = 20;
 const MAX_IMPORT_COMMANDS = 200;
 
@@ -157,6 +161,25 @@ export class DirectCommandRepository {
     return summary;
   }
 
+  async commitBulkImport(items: Array<DirectCommandInput | null>): Promise<BulkCommitSummary> {
+    const initial = previewBulkImport(items, await this.list());
+    const summary: BulkCommitSummary = { created: 0, merged: 0, duplicate: 0, error: 0 };
+    for (const item of initial.items) {
+      if (item.status === "duplicate") { summary.duplicate += 1; continue; }
+      if (item.status === "error" || !item.input) { summary.error += 1; continue; }
+      try {
+        if (item.status === "create") { await this.create(item.input); summary.created += 1; continue; }
+        const existing = (await this.list()).find((command) => command.id === item.existingId);
+        if (!existing) { summary.error += 1; continue; }
+        const triggers = uniqueTriggers(existing.canonicalTrigger, [...existing.triggers, item.input.canonicalTrigger, ...(item.input.triggers || [])]);
+        if (triggers.length === existing.triggers.length) { summary.duplicate += 1; continue; }
+        await this.update(existing.id, { triggers });
+        summary.merged += 1;
+      } catch { summary.error += 1; }
+    }
+    return summary;
+  }
+
   async export() {
     return (await this.list()).map(({ title, canonicalTrigger, triggers, response, enabled, tags }) => ({ title, canonicalTrigger, triggers, response, enabled, tags }));
   }
@@ -220,10 +243,10 @@ function validateInput(input: DirectCommandInput) {
   const title = input.title?.trim();
   const canonicalTrigger = input.canonicalTrigger?.trim();
   const response = input.response?.trim();
-  if (!title || !canonicalTrigger || !response || title.length > 160 || canonicalTrigger.length > MAX_TEXT_LENGTH || response.length > MAX_TEXT_LENGTH) throw new Error("Title, trigger, and response are required.");
+  if (!title || !canonicalTrigger || !response || title.length > MAX_TITLE_LENGTH || canonicalTrigger.length > MAX_TRIGGER_LENGTH || response.length > MAX_RESPONSE_LENGTH) throw new Error("Title, trigger, and response are required.");
   const triggers = uniqueTriggers(canonicalTrigger, input.triggers || []);
   if (triggers.length > MAX_TRIGGERS) throw new Error("Too many triggers.");
-  return { title, canonicalTrigger, triggers, response, enabled: input.enabled !== false, tags: [...new Set((input.tags || []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 12) };
+  return { title, canonicalTrigger, triggers, response, enabled: input.enabled !== false, tags: [...new Set((input.tags || []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 20) };
 }
 
 function uniqueTriggers(canonicalTrigger: string, triggers: string[]) {

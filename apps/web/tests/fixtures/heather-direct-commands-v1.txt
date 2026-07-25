@@ -1,0 +1,14 @@
+HEATHER_DIRECT_COMMAND_FILE_VERSION: 1
+
+=== HEATHER_DIRECT_COMMAND ===
+TITLE: Heather 소개
+TRIGGER: Heather가 뭐야?
+TRIGGERS:
+- Heather를 소개해줘
+RESPONSE:
+Heather는 사용자의 작업 흐름을 연결하는 개인 AI 운영체제입니다.
+TAGS:
+- Heather
+- 소개
+ENABLED: true
+=== END ===
