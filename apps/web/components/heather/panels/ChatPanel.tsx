@@ -45,6 +45,7 @@ import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
 import type { DesktopActionResult, MediaActionResult } from "@heather/platform";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { useConversationStore } from "../../../lib/conversations/use-conversation-store";
+import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 
 interface ChatPanelProps {
   memories: MemoryRecord[];
@@ -406,10 +407,13 @@ export function ChatPanel({
   }
 
   async function requestIntentApi(payload: ChatRequestPayload): Promise<ApiChatResponse> {
+    const sessionResult = await getSupabaseBrowserClient()?.auth.getSession();
+    const accessToken = sessionResult?.data.session?.access_token;
     const response = await fetch("/api/intent/resolve", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
       },
       body: JSON.stringify(payload)
     });

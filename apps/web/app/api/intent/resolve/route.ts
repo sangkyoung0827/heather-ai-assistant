@@ -3,6 +3,7 @@ import type { ChatRequestPayload } from "@heather/core";
 import { DirectCommandRepository } from "../../../../lib/intent/direct-command-repository";
 import { RepeatedQueryLearningService } from "../../../../lib/intent/repeated-query-learning";
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
+import { runMatchedSkill } from "../../../../lib/skills/agent-runtime";
 
 export const runtime = "nodejs";
 
@@ -41,6 +42,13 @@ export async function POST(request: Request) {
         userMessageId: turn.userMessage.id,
         assistantMessageId: assistant.id
       });
+    }
+
+    const skill = await runMatchedSkill(payload.message, payload.settings.defaultLanguage, request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null);
+    if (skill) {
+      await repository.logIntent("fallback", payload.message);
+      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: skill.message, source: "skill", replyTo: clientMessageId, metadata: { provider: "agent-runtime", model: skill.skillId } });
+      return NextResponse.json({ message: skill.message, title: createConversationTitle(payload.message, "general"), provider: "agent-runtime", model: skill.skillId, result: "skill", conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: assistant.id });
     }
 
     const fallbackResponse = await fetch(new URL("/api/chat", request.url), {
