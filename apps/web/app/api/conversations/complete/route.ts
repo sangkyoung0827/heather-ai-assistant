@@ -8,6 +8,7 @@ type Body = {
   clientMessageId?: string;
   conversationId?: string;
   response?: { message?: string; provider?: string; model?: string };
+  messageAlreadyPersisted?: boolean;
 };
 
 export async function POST(request: Request) {
@@ -15,8 +16,10 @@ export async function POST(request: Request) {
     const body = await request.json() as Body;
     if (!body.message?.trim() || !body.clientMessageId || !body.response?.message?.trim()) return NextResponse.json({ error: "Invalid conversation completion." }, { status: 400 });
     const repository = new ConversationRepository();
-    const turn = await repository.beginMessage({ conversationId: body.conversationId, type: "general", title: createConversationTitle(body.message, "general"), content: body.message, clientMessageId: body.clientMessageId });
-    const existing = turn.duplicate ? await repository.findCompletedAssistant(turn.conversation.id, body.clientMessageId) : null;
+    const turn = body.messageAlreadyPersisted && body.conversationId
+      ? await repository.getStoredTurn({ conversationId: body.conversationId, type: "general", clientMessageId: body.clientMessageId })
+      : await repository.beginMessage({ conversationId: body.conversationId, type: "general", title: createConversationTitle(body.message, "general"), content: body.message, clientMessageId: body.clientMessageId });
+    const existing = !body.messageAlreadyPersisted && "duplicate" in turn && turn.duplicate ? await repository.findCompletedAssistant(turn.conversation.id, body.clientMessageId) : null;
     const assistant = existing || await repository.appendAssistant({ conversationId: turn.conversation.id, content: body.response.message, source: body.response.provider === "desktop" ? "system" : "system", replyTo: body.clientMessageId, metadata: { provider: body.response.provider || "system", model: body.response.model } });
     return NextResponse.json({ conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: assistant.id, duplicate: Boolean(existing) });
   } catch {

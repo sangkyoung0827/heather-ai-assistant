@@ -93,6 +93,18 @@ export type ProjectPriority = "low" | "medium" | "high" | "urgent";
 
 export type ConversationRole = "system" | "user" | "assistant";
 
+export interface MessageAttachment {
+  id: string;
+  type: "image";
+  storagePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+  status: "pending" | "uploading" | "ready" | "failed";
+  url?: string;
+}
+
 export interface ConversationMessage {
   id: string;
   role: ConversationRole;
@@ -102,6 +114,7 @@ export interface ConversationMessage {
   source?: "text" | "voice";
   provider?: string;
   model?: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface Conversation {
@@ -344,6 +357,8 @@ export interface ChatRequestPayload {
   projects: ProjectRecord[];
   teachings?: TeachingRecord[];
   automationRecipes?: AutomationRecipe[];
+  /** The media route has already persisted the user message before generating a reply. */
+  messageAlreadyPersisted?: boolean;
 }
 
 export interface ChatResponsePayload {

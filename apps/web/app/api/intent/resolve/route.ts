@@ -15,11 +15,14 @@ export async function POST(request: Request) {
     const clientMessageId = payload.clientMessageId || payload.messageId;
     if (!clientMessageId) return NextResponse.json({ error: "clientMessageId is required." }, { status: 400 });
     const conversations = new ConversationRepository();
-    turn = await conversations.beginMessage({ conversationId: payload.conversationId, type: "general", title: createConversationTitle(payload.message, "general"), content: payload.message, clientMessageId });
-    if (turn.duplicate) {
-      const previous = await conversations.findCompletedAssistant(turn.conversation.id, clientMessageId);
-      if (previous) return NextResponse.json({ message: previous.content, title: turn.conversation.title, provider: previous.provider, model: previous.model, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: previous.id, duplicate: true });
-      return NextResponse.json({ error: "이 메시지는 이미 처리 중입니다. 잠시 후 대화를 다시 열어주세요.", conversationId: turn.conversation.id }, { status: 409 });
+    const resolvedTurn = payload.messageAlreadyPersisted && payload.conversationId
+      ? await conversations.getStoredTurn({ conversationId: payload.conversationId, type: "general", clientMessageId })
+      : await conversations.beginMessage({ conversationId: payload.conversationId, type: "general", title: createConversationTitle(payload.message, "general"), content: payload.message, clientMessageId });
+    turn = resolvedTurn;
+    if (!payload.messageAlreadyPersisted && resolvedTurn.duplicate) {
+      const previous = await conversations.findCompletedAssistant(resolvedTurn.conversation.id, clientMessageId);
+      if (previous) return NextResponse.json({ message: previous.content, title: resolvedTurn.conversation.title, provider: previous.provider, model: previous.model, conversationId: resolvedTurn.conversation.id, userMessageId: resolvedTurn.userMessage.id, assistantMessageId: previous.id, duplicate: true });
+      return NextResponse.json({ error: "이 메시지는 이미 처리 중입니다. 잠시 후 대화를 다시 열어주세요.", conversationId: resolvedTurn.conversation.id }, { status: 409 });
     }
     const repository = new DirectCommandRepository();
     const match = await repository.find(payload.message);

@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Conversation, ConversationMessage } from "@heather/core";
+import type { Conversation, ConversationMessage, MessageAttachment } from "@heather/core";
 import type { ConversationListItem, ConversationType, StoredMessageStatus } from "./types";
 
 const MAX_MESSAGE_LENGTH = 12_000;
@@ -8,6 +8,8 @@ const MAX_METADATA_BYTES = 4_000;
 
 type ConversationRow = Record<string, unknown>;
 type MessageRow = Record<string, unknown>;
+
+export type AttachmentInput = Omit<MessageAttachment, "url">;
 
 export class ConversationRepository {
   private readonly client: SupabaseClient;
@@ -68,12 +70,14 @@ export class ConversationRepository {
     const { data, error } = await query;
     if (error) throw error;
     const rows = (data || []) as MessageRow[];
-    const page = rows.slice(0, limit).reverse().map(toConversationMessage);
+    const pageRows = rows.slice(0, limit).reverse();
+    const attachments = await this.getAttachments(pageRows);
+    const page = pageRows.map((row) => toConversationMessage(row, attachments.get(String(row.id)) || []));
     return { messages: page, nextCursor: rows.length > limit ? String(rows[limit - 1]?.created_at || "") : null };
   }
 
-  async beginMessage(input: { conversationId?: string; type: ConversationType; title: string; content: string; clientMessageId: string }) {
-    const content = validateContent(input.content);
+  async beginMessage(input: { conversationId?: string; type: ConversationType; title: string; content: string; clientMessageId: string; allowEmpty?: boolean }) {
+    const content = validateContent(input.content, input.allowEmpty);
     const clientMessageId = validateClientMessageId(input.clientMessageId);
     const conversation = input.conversationId
       ? await this.requireConversation(input.conversationId, input.type)
@@ -112,6 +116,67 @@ export class ConversationRepository {
       .maybeSingle();
     if (error) throw error;
     return data ? toConversationMessage(data as MessageRow) : null;
+  }
+
+  async findUserMessage(conversationId: string, clientMessageId: string) {
+    const { data, error } = await this.client
+      .from("conversation_messages")
+      .select("id, conversation_id, role, content, source, status, client_message_id, metadata, created_at")
+      .eq("conversation_id", conversationId)
+      .eq("role", "user")
+      .eq("client_message_id", clientMessageId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? toConversationMessage(data as MessageRow) : null;
+  }
+
+  async getStoredTurn(input: { conversationId: string; type: ConversationType; clientMessageId: string }) {
+    const conversation = await this.requireConversation(input.conversationId, input.type);
+    const userMessage = await this.findUserMessage(input.conversationId, input.clientMessageId);
+    if (!userMessage) throw new Error("The saved media message was not found.");
+    return { conversation: toConversationListItem(conversation, ""), userMessage, duplicate: false };
+  }
+
+  async createAttachments(messageId: string, attachments: AttachmentInput[]) {
+    if (!attachments.length) return [];
+    const { data, error: readError } = await this.client.from("conversation_messages").select("metadata").eq("id", messageId).single();
+    if (readError) throw readError;
+    const metadata = data?.metadata && typeof data.metadata === "object" ? data.metadata as Record<string, unknown> : {};
+    const safeAttachments = attachments.map(({ id, type, storagePath, mimeType, sizeBytes, width, height, status }) => ({ id, type, storagePath, mimeType, sizeBytes, width, height, status }));
+    const { error } = await this.client.from("conversation_messages").update({ metadata: { ...metadata, attachments: safeAttachments } }).eq("id", messageId);
+    if (error) throw error;
+    return attachments;
+  }
+
+  async deleteMessage(messageId: string) {
+    const { error } = await this.client.from("conversation_messages").delete().eq("id", messageId);
+    if (error) throw error;
+  }
+
+  storage() {
+    return this.client.storage.from("chat-media");
+  }
+
+  async ensureMediaBucket() {
+    const { data, error } = await this.client.storage.getBucket("chat-media");
+    if (!data) {
+      const created = await this.client.storage.createBucket("chat-media", {
+        public: false,
+        fileSizeLimit: 10 * 1024 * 1024,
+        allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"]
+      });
+      if (created.error && !/already exists/i.test(created.error.message)) throw created.error;
+      return;
+    }
+    if (error) throw error;
+    if (data.public) {
+      const updated = await this.client.storage.updateBucket("chat-media", {
+        public: false,
+        fileSizeLimit: 10 * 1024 * 1024,
+        allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"]
+      });
+      if (updated.error) throw updated.error;
+    }
   }
 
   async appendAssistant(input: { conversationId: string; content: string; source: string; status?: StoredMessageStatus; replyTo: string; metadata?: Record<string, unknown> }) {
@@ -178,6 +243,26 @@ export class ConversationRepository {
     }
     return previews;
   }
+
+  private async getAttachments(messageRows: MessageRow[]) {
+    const attachments = new Map<string, MessageAttachment[]>();
+    for (const row of messageRows) {
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {};
+      const rawAttachments = Array.isArray(metadata.attachments) ? metadata.attachments : [];
+      const hydrated: MessageAttachment[] = [];
+      for (const raw of rawAttachments) {
+        if (!raw || typeof raw !== "object") continue;
+        const item = raw as Record<string, unknown>;
+        const storagePath = typeof item.storagePath === "string" ? item.storagePath : "";
+        const mimeType = typeof item.mimeType === "string" ? item.mimeType : "";
+        if (!storagePath || !mimeType || item.status !== "ready") continue;
+        const signed = await this.client.storage.from("chat-media").createSignedUrl(storagePath, 60 * 30);
+        hydrated.push({ id: String(item.id), type: "image", storagePath, mimeType, sizeBytes: Number(item.sizeBytes || 0), width: numberOrUndefined(item.width), height: numberOrUndefined(item.height), status: "ready", url: signed.data?.signedUrl });
+      }
+      if (hydrated.length) attachments.set(String(row.id), hydrated);
+    }
+    return attachments;
+  }
 }
 
 export function createConversationTitle(message: string, type: ConversationType) {
@@ -190,14 +275,15 @@ function toConversationListItem(row: ConversationRow, preview: string): Conversa
   return { id: String(row.id), title: String(row.title), messages: [], createdAt: String(row.created_at), updatedAt: String(row.updated_at), archived: Boolean(row.archived), conversationType: row.conversation_type === "research" ? "research" : "general", lastMessageAt: String(row.last_message_at), preview };
 }
 
-function toConversationMessage(row: MessageRow): ConversationMessage {
+function toConversationMessage(row: MessageRow, attachments: MessageAttachment[] = []): ConversationMessage {
   const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {};
-  return { id: String(row.id), role: row.role as ConversationMessage["role"], content: String(row.content), createdAt: String(row.created_at), status: row.status as StoredMessageStatus, source: row.source === "voice" ? "voice" : "text", provider: typeof metadata.provider === "string" ? metadata.provider : undefined, model: typeof metadata.model === "string" ? metadata.model : undefined };
+  return { id: String(row.id), role: row.role as ConversationMessage["role"], content: String(row.content), createdAt: String(row.created_at), status: row.status as StoredMessageStatus, source: row.source === "voice" ? "voice" : "text", provider: typeof metadata.provider === "string" ? metadata.provider : undefined, model: typeof metadata.model === "string" ? metadata.model : undefined, attachments };
 }
 
 function validateTitle(value: string, type: ConversationType) { const title = value.trim() || (type === "research" ? "새 연구 대화" : "새 대화"); if (title.length > MAX_TITLE_LENGTH) return title.slice(0, MAX_TITLE_LENGTH); return title; }
-function validateContent(value: string) { const content = value.trim(); if (!content || content.length > MAX_MESSAGE_LENGTH) throw new Error("Message must be between 1 and 12,000 characters."); return content; }
+function validateContent(value: string, allowEmpty = false) { const content = value.trim(); if ((!allowEmpty && !content) || content.length > MAX_MESSAGE_LENGTH) throw new Error("Message must be between 1 and 12,000 characters."); return content; }
 function validateClientMessageId(value: string) { const id = value.trim(); if (!id || id.length > 160) throw new Error("Invalid client message ID."); return id; }
 function clampLimit(value: number | undefined, fallback: number, max: number) { const number = Number(value); return Number.isFinite(number) ? Math.min(Math.max(Math.floor(number), 1), max) : fallback; }
 function isUuid(value: string) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
 function escapeLike(value: string) { return value.replace(/[%_]/g, "\\$&"); }
+function numberOrUndefined(value: unknown) { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : undefined; }

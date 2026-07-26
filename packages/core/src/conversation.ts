@@ -28,7 +28,7 @@ export function createMessage(
   role: ConversationMessage["role"],
   content: string,
   source: ConversationMessage["source"] = "text",
-  metadata: Pick<ConversationMessage, "provider" | "model"> = {}
+  metadata: Pick<ConversationMessage, "provider" | "model" | "attachments"> = {}
 ): ConversationMessage {
   return {
     id: createId("msg"),
