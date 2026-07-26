@@ -16,11 +16,9 @@ export function getSupabaseBrowserClient() {
     browserClient = createClient(url, anonKey, {
       auth: {
         persistSession: true,
-        storage: {
-          getItem: (key) => document.cookie.split("; ").find((entry) => entry.startsWith(`${encodeURIComponent(key)}=`))?.split("=").slice(1).join("=") ? decodeURIComponent(document.cookie.split("; ").find((entry) => entry.startsWith(`${encodeURIComponent(key)}=`))!.split("=").slice(1).join("=")) : null,
-          setItem: (key, value) => { document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; Path=/; SameSite=Lax; Secure; Max-Age=31536000`; },
-          removeItem: (key) => { document.cookie = `${encodeURIComponent(key)}=; Path=/; SameSite=Lax; Secure; Max-Age=0`; }
-        }
+        flowType: "pkce",
+        // The callback page completes both PKCE and legacy implicit flows explicitly.
+        detectSessionInUrl: false
       }
     });
   }

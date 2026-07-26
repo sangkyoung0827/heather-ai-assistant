@@ -11,10 +11,14 @@ export default function AuthCallbackPage() {
 
     async function completeSignIn() {
       const params = new URLSearchParams(window.location.search);
-      const client = getSupabaseBrowserClient();
+      const hashParams = new URLSearchParams(window.location.hash.slice(1));
       const code = params.get("code");
-      if (params.get("error") || !client) {
-        if (active) setMessage(params.get("error_description") || "Sign-in was cancelled or could not be completed.");
+      const accessToken = hashParams.get("access_token");
+      const refreshToken = hashParams.get("refresh_token");
+      const providerError = params.get("error_description") || hashParams.get("error_description");
+      const client = getSupabaseBrowserClient();
+      if (params.get("error") || hashParams.get("error") || !client) {
+        if (active) setMessage(providerError || "Sign-in was cancelled or could not be completed.");
         return;
       }
 
@@ -22,14 +26,18 @@ export default function AuthCallbackPage() {
         if (code) {
           const { error } = await client.auth.exchangeCodeForSession(code);
           if (error) throw error;
+        } else if (accessToken && refreshToken) {
+          // Preserve compatibility with an OAuth response already using the implicit flow.
+          const { error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          if (error) throw error;
         } else {
-          // Implicit OAuth returns tokens in the URL hash. Supabase initializes that session on the client.
           const { data, error } = await client.auth.getSession();
           if (error || !data.session) throw error || new Error("No session returned from OAuth.");
         }
+        window.history.replaceState({}, document.title, window.location.pathname);
         if (active) router.replace("/memory/personal");
-      } catch {
-        if (active) setMessage("Sign-in could not be completed. Please try again.");
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? `Sign-in could not be completed: ${error.message}` : "Sign-in could not be completed. Please try again.");
       }
     }
 
