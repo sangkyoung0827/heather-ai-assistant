@@ -7,16 +7,17 @@ import {
   Camera,
   Copy,
   ImagePlus,
-  Info,
   Loader2,
+  Maximize2,
   MessageSquare,
   MessageSquarePlus,
   Mic,
   MicOff,
-  MoreHorizontal,
+  Minimize2,
   Search,
   Send,
   Smile,
+  Sticker,
   Square,
   Trash2,
   Volume2,
@@ -123,6 +124,7 @@ let activeHeatherAudioUrl: string | null = null;
 type DraftAttachment = { id: string; file: File; previewUrl: string; status: "pending" | "failed"; error?: string };
 
 const EMOJI_OPTIONS = ["😀", "🙂", "✨", "👍", "🙏", "🎯", "💡", "📌", "❤️", "🎉", "🤔", "✅"];
+const STICKER_OPTIONS = ["❤️", "👍", "👏", "🎉", "✨", "🔥", "💯", "🙏"];
 
 export function ChatPanel({
   memories,
@@ -143,12 +145,15 @@ export function ChatPanel({
   const [providerStatus, setProviderStatus] = useState("");
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [showMediaMenu, setShowMediaMenu] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [lightbox, setLightbox] = useState<{ images: MessageAttachment[]; index: number } | null>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"list" | "chat">("list");
+  const [focusMode, setFocusMode] = useState(true);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseDraftRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -547,7 +552,7 @@ export function ChatPanel({
   const messages = activeConversation?.messages || [];
   const hasComposerContent = Boolean(draft.trim() || attachments.length);
   return (
-    <div className={`chat-workspace dm-workspace ${mobilePanel === "chat" ? "is-mobile-chat" : "is-mobile-list"}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+    <div className={`chat-workspace dm-workspace ${mobilePanel === "chat" ? "is-mobile-chat" : "is-mobile-list"} ${focusMode ? "is-focus-mode" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
       <aside className="chat-conversation-panel">
         <div className="chat-list-toolbar">
           <div className="dm-list-heading"><strong>{copy.messages}</strong><button type="button" onClick={handleNewConversation} className="dm-icon-button" aria-label={copy.newConversation} title={copy.newConversation}><MessageSquarePlus /></button></div>
@@ -587,8 +592,8 @@ export function ChatPanel({
 
       <section className="chat-main-panel">
         <div className="chat-main-header">
-          <div className="dm-header-person"><button type="button" className="dm-back" onClick={() => setMobilePanel("list")} aria-label={copy.back}><ArrowLeft /></button><HeatherAvatar settings={settings} size="medium" /><button type="button" className="dm-header-title" onClick={() => setProviderStatus(copy.partner)}><strong>Heather</strong><small>{copy.partner}</small></button></div>
-          <div className="dm-header-actions"><button type="button" className="dm-icon-button" onClick={() => setProviderStatus(copy.partner)} aria-label={copy.conversationInfo} title={copy.conversationInfo}><Info /></button><button type="button" className="dm-icon-button" onClick={() => setProviderStatus(copy.moreUnavailable)} aria-label={copy.more} title={copy.more}><MoreHorizontal /></button></div>
+          <div className="dm-header-person"><button type="button" className="dm-back" onClick={() => { setFocusMode(false); setMobilePanel("list"); }} aria-label={copy.back}><ArrowLeft /></button><HeatherAvatar settings={settings} size="medium" /><button type="button" className="dm-header-title" onClick={() => setProviderStatus(copy.partner)}><strong>Heather</strong><small>{copy.partner}</small></button></div>
+          <div className="dm-header-actions"><button type="button" className="dm-icon-button" onClick={() => setFocusMode((focused) => !focused)} aria-label={focusMode ? copy.showConversations : copy.focusConversation} title={focusMode ? copy.showConversations : copy.focusConversation}>{focusMode ? <Minimize2 /> : <Maximize2 />}</button><button type="button" className="dm-icon-button" onClick={() => { setFocusMode(false); setMobilePanel("list"); }} aria-label={copy.back} title={copy.back}><X /></button></div>
         </div>
 
         <div className="chat-message-area dm-message-area heather-scrollbar" ref={messageAreaRef} onScroll={(event) => { const target = event.currentTarget; atBottomRef.current = target.scrollHeight - target.scrollTop - target.clientHeight < 80; if (atBottomRef.current) setShowNewMessages(false); }}>
@@ -617,23 +622,10 @@ export function ChatPanel({
         <div className="chat-composer-wrap">
           {attachments.length ? <div className="dm-attachment-strip" aria-label={copy.photoPreview}>{attachments.map((attachment) => <div key={attachment.id} className="dm-attachment-preview"><img src={attachment.previewUrl} alt="" /><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={copy.removePhoto}><X /></button>{attachment.status === "failed" ? <small>{copy.tryAgain}</small> : null}</div>)}</div> : null}
           <div className="chat-composer dm-composer">
-            <button type="button" onClick={() => void openCamera()} className="dm-composer-button" title={copy.camera} aria-label={copy.camera}><Camera /></button>
-            <button type="button" onClick={() => imageInputRef.current?.click()} className="dm-composer-button" title={copy.photos} aria-label={copy.photos}><ImagePlus /></button>
+            <div className="dm-emoji-wrap"><button type="button" onClick={() => { setShowEmojiPicker((open) => !open); setShowStickerPicker(false); }} className="dm-composer-button" title={copy.emoji} aria-label={copy.emoji}><Smile /></button>{showEmojiPicker ? <div className="dm-emoji-picker" role="dialog" aria-label={copy.emoji}>{EMOJI_OPTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</div> : null}</div>
+            <div className="dm-media-wrap"><button type="button" onClick={() => setShowMediaMenu((open) => !open)} className="dm-composer-button" title={copy.photos} aria-label={copy.photos}><ImagePlus /></button>{showMediaMenu ? <div className="dm-media-menu" role="dialog" aria-label={copy.photos}><button type="button" onClick={() => { setShowMediaMenu(false); imageInputRef.current?.click(); }}><ImagePlus />{copy.photos}</button><button type="button" onClick={() => { setShowMediaMenu(false); void openCamera(); }}><Camera />{copy.camera}</button></div> : null}</div>
             <input ref={imageInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} />
             <input ref={cameraInputRef} className="sr-only" type="file" accept="image/*" capture="user" onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} />
-            <button
-              type="button"
-              onClick={toggleListening}
-              className={`dm-composer-button ${
-                isListening
-                  ? "is-listening"
-                  : ""
-              }`}
-              title={isListening ? copy.stopListening : copy.voiceInput}
-              aria-label={isListening ? copy.stopListening : copy.voiceInput}
-            >
-              {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-            </button>
             <textarea
               value={draft}
               onChange={(event) => {
@@ -652,17 +644,29 @@ export function ChatPanel({
               className="dm-composer-textarea"
               rows={1}
             />
-            <div className="dm-emoji-wrap"><button type="button" onClick={() => setShowEmojiPicker((open) => !open)} className="dm-composer-button" title={copy.emoji} aria-label={copy.emoji}><Smile /></button>{showEmojiPicker ? <div className="dm-emoji-picker" role="dialog" aria-label={copy.emoji}>{EMOJI_OPTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</div> : null}</div>
             <button
               type="button"
-              onClick={hasComposerContent ? () => void handleSend() : toggleListening}
-              disabled={isSending}
-              className={`dm-send-button ${hasComposerContent ? "has-content" : ""}`}
-              title={hasComposerContent ? copy.send : copy.voiceInput}
-              aria-label={hasComposerContent ? copy.send : copy.voiceInput}
+              onClick={toggleListening}
+              className={`dm-composer-button ${
+                isListening
+                  ? "is-listening"
+                  : ""
+              }`}
+              title={isListening ? copy.stopListening : copy.voiceInput}
+              aria-label={isListening ? copy.stopListening : copy.voiceInput}
             >
-              {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : hasComposerContent ? <Send className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
             </button>
+            {hasComposerContent ? <button
+              type="button"
+              onClick={() => void handleSend()}
+              disabled={isSending}
+              className="dm-send-button has-content"
+              title={copy.send}
+              aria-label={copy.send}
+            >
+              {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            </button> : <div className="dm-emoji-wrap"><button type="button" onClick={() => { setShowStickerPicker((open) => !open); setShowEmojiPicker(false); }} className="dm-composer-button" title={copy.sticker} aria-label={copy.sticker}><Sticker /></button>{showStickerPicker ? <div className="dm-emoji-picker dm-sticker-picker" role="dialog" aria-label={copy.sticker}>{STICKER_OPTIONS.map((sticker) => <button key={sticker} type="button" onClick={() => { insertEmoji(sticker); setShowStickerPicker(false); }}>{sticker}</button>)}</div> : null}</div>}
           </div>
           {providerStatus ? <p className="dm-composer-status" role="status">{providerStatus}</p> : null}
         </div>
@@ -674,11 +678,11 @@ export function ChatPanel({
 }
 
 const KO = {
-  messages: "채팅", newConversation: "새 대화", search: "검색", noMessages: "아직 메시지가 없습니다.", deleteConversation: "대화 삭제", loading: "대화를 불러오는 중입니다.", noResults: "검색 결과가 없습니다.", emptyConversations: "아직 대화가 없습니다.", partner: "일상과 연구를 함께하는 파트너", conversationInfo: "대화 정보", more: "더보기", moreUnavailable: "추가 대화 메뉴는 준비 중입니다.", back: "대화 목록으로", loadOlder: "이전 메시지 불러오기", welcome: "안녕하세요. 오늘은 무엇을 함께 이야기해볼까요?", suggestions: [["문서 요약", "이 문서의 핵심 내용을 요약해줘"], ["일정 정리", "오늘 해야 할 일을 정리해줘"], ["아이디어 정리", "이 아이디어를 실행 가능한 항목으로 정리해줘"], ["공지 작성", "이 내용을 공지문으로 작성해줘"]] as Array<[string, string]>, thinking: "Heather가 답변을 정리하고 있습니다.", sending: "메시지를 보내는 중입니다.", photo: "사진", placeholder: "메시지 보내기...", photos: "사진", camera: "카메라", emoji: "이모지 선택", voiceInput: "음성 입력", stopListening: "음성 입력 중지", send: "보내기", photoPreview: "첨부 사진 미리보기", removePhoto: "첨부 사진 제거", tryAgain: "다시 시도", maxPhotos: "한 메시지에는 사진을 최대 10장까지 첨부할 수 있습니다.", unsupportedFile: "지원하지 않는 파일 형식입니다.", fileTooLarge: "파일이 너무 큽니다.", cameraDenied: "카메라 권한이 거부되었습니다. 사진 선택을 이용하세요.", voiceUnsupported: "이 브라우저는 음성 인식을 지원하지 않습니다.", voiceDenied: "마이크 권한이 거부되었습니다. 브라우저/시스템 권한을 확인하세요.", voiceError: "음성 입력 오류", listening: "음성 입력 중", voiceOutputDisabled: "음성 출력이 꺼져 있습니다.", sendFailed: "사진을 전송할 수 없습니다.", newMessages: "새 메시지", copy: "복사", read: "읽어주기", stop: "중지", imageAlt: "전송한 사진"
+  messages: "채팅", newConversation: "새 대화", search: "검색", noMessages: "아직 메시지가 없습니다.", deleteConversation: "대화 삭제", loading: "대화를 불러오는 중입니다.", noResults: "검색 결과가 없습니다.", emptyConversations: "아직 대화가 없습니다.", partner: "일상과 연구를 함께하는 파트너", conversationInfo: "대화 정보", more: "더보기", moreUnavailable: "추가 대화 메뉴는 준비 중입니다.", back: "대화 목록으로", focusConversation: "대화에 집중", showConversations: "대화 목록 보기", sticker: "스티커", loadOlder: "이전 메시지 불러오기", welcome: "안녕하세요. 오늘은 무엇을 함께 이야기해볼까요?", suggestions: [["문서 요약", "이 문서의 핵심 내용을 요약해줘"], ["일정 정리", "오늘 해야 할 일을 정리해줘"], ["아이디어 정리", "이 아이디어를 실행 가능한 항목으로 정리해줘"], ["공지 작성", "이 내용을 공지문으로 작성해줘"]] as Array<[string, string]>, thinking: "Heather가 답변을 정리하고 있습니다.", sending: "메시지를 보내는 중입니다.", photo: "사진", placeholder: "메시지 입력...", photos: "사진", camera: "카메라", emoji: "이모지 선택", voiceInput: "음성 입력", stopListening: "음성 입력 중지", send: "보내기", photoPreview: "첨부 사진 미리보기", removePhoto: "첨부 사진 제거", tryAgain: "다시 시도", maxPhotos: "한 메시지에는 사진을 최대 10장까지 첨부할 수 있습니다.", unsupportedFile: "지원하지 않는 파일 형식입니다.", fileTooLarge: "파일이 너무 큽니다.", cameraDenied: "카메라 권한이 거부되었습니다. 사진 선택을 이용하세요.", voiceUnsupported: "이 브라우저는 음성 인식을 지원하지 않습니다.", voiceDenied: "마이크 권한이 거부되었습니다. 브라우저/시스템 권한을 확인하세요.", voiceError: "음성 입력 오류", listening: "음성 입력 중", voiceOutputDisabled: "음성 출력이 꺼져 있습니다.", sendFailed: "사진을 전송할 수 없습니다.", newMessages: "새 메시지", copy: "복사", read: "읽어주기", stop: "중지", imageAlt: "전송한 사진"
 };
 
 const EN = {
-  messages: "Messages", newConversation: "New message", search: "Search", noMessages: "No messages yet.", deleteConversation: "Delete conversation", loading: "Loading conversations...", noResults: "No results found.", emptyConversations: "No conversations yet.", partner: "A partner for everyday life and research", conversationInfo: "Conversation information", more: "More", moreUnavailable: "More conversation options are coming soon.", back: "Back to conversations", loadOlder: "Load older messages", welcome: "Hi. What would you like to talk about today?", suggestions: [["Summarize a document", "Summarize the key points of this document"], ["Plan my day", "Organize what I need to do today"], ["Organize ideas", "Turn this idea into actionable items"], ["Write an announcement", "Write this as an announcement"]] as Array<[string, string]>, thinking: "Heather is preparing a reply.", sending: "Sending your message...", photo: "Photo", placeholder: "Message...", photos: "Photos", camera: "Camera", emoji: "Choose emoji", voiceInput: "Voice input", stopListening: "Stop voice input", send: "Send", photoPreview: "Attached photo preview", removePhoto: "Remove attached photo", tryAgain: "Try again", maxPhotos: "You can attach up to 10 photos to one message.", unsupportedFile: "Unsupported file type.", fileTooLarge: "File is too large.", cameraDenied: "Camera permission was denied. Use photo selection instead.", voiceUnsupported: "This browser does not support voice input.", voiceDenied: "Microphone permission was denied. Check browser and system permissions.", voiceError: "Voice input error", listening: "Listening", voiceOutputDisabled: "Voice output is off.", sendFailed: "Could not send the photo.", newMessages: "New messages", copy: "Copy", read: "Read aloud", stop: "Stop", imageAlt: "Sent photo"
+  messages: "Messages", newConversation: "New message", search: "Search", noMessages: "No messages yet.", deleteConversation: "Delete conversation", loading: "Loading conversations...", noResults: "No results found.", emptyConversations: "No conversations yet.", partner: "A partner for everyday life and research", conversationInfo: "Conversation information", more: "More", moreUnavailable: "More conversation options are coming soon.", back: "Back to conversations", focusConversation: "Focus conversation", showConversations: "Show conversations", sticker: "Sticker", loadOlder: "Load older messages", welcome: "Hi. What would you like to talk about today?", suggestions: [["Summarize a document", "Summarize the key points of this document"], ["Plan my day", "Organize what I need to do today"], ["Organize ideas", "Turn this idea into actionable items"], ["Write an announcement", "Write this as an announcement"]] as Array<[string, string]>, thinking: "Heather is preparing a reply.", sending: "Sending your message...", photo: "Photo", placeholder: "Message...", photos: "Photos", camera: "Camera", emoji: "Choose emoji", voiceInput: "Voice input", stopListening: "Stop voice input", send: "Send", photoPreview: "Attached photo preview", removePhoto: "Remove attached photo", tryAgain: "Try again", maxPhotos: "You can attach up to 10 photos to one message.", unsupportedFile: "Unsupported file type.", fileTooLarge: "File is too large.", cameraDenied: "Camera permission was denied. Use photo selection instead.", voiceUnsupported: "This browser does not support voice input.", voiceDenied: "Microphone permission was denied. Check browser and system permissions.", voiceError: "Voice input error", listening: "Listening", voiceOutputDisabled: "Voice output is off.", sendFailed: "Could not send the photo.", newMessages: "New messages", copy: "Copy", read: "Read aloud", stop: "Stop", imageAlt: "Sent photo"
 };
 
 type ChatCopy = typeof KO;
