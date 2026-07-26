@@ -5,6 +5,8 @@ dist
 apps/web/out-tauri
 coverage
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 .DS_Store
 .env
 .env.*
