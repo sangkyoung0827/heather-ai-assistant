@@ -16,6 +16,7 @@ import {
 import type { HeatherDatabase } from "./types";
 
 const STORAGE_PREFIX = "heather.ai";
+const AVATAR_VARIANTS = new Set(["face-01", "face-02", "face-03", "face-04"]);
 
 type CollectionName = "conversations" | "projects" | "memories" | "teachings" | "automationRecipes";
 
@@ -70,6 +71,11 @@ export class BrowserHeatherDatabase implements HeatherDatabase {
       ...stored
     };
 
+    // Old installs used abstract icon values and an optional automatic language.
+    // Normalize them once at the storage boundary so every UI surface receives a safe value.
+    merged.avatarVariant = AVATAR_VARIANTS.has(merged.avatarVariant) ? merged.avatarVariant : "face-01";
+    merged.defaultLanguage = merged.defaultLanguage === "en" ? "en" : "ko";
+
     const hasStoredSettings = Boolean(rawSettings);
     const isLegacyLocalOnlyDefault =
       hasStoredSettings &&
@@ -88,6 +94,10 @@ export class BrowserHeatherDatabase implements HeatherDatabase {
     if (merged.apiUsageMonth !== currentMonth) {
       merged.apiUsageMonth = currentMonth;
       merged.apiCallsThisMonth = 0;
+    }
+
+    if (stored.avatarVariant !== merged.avatarVariant || stored.defaultLanguage !== merged.defaultLanguage) {
+      writeJson("settings", merged);
     }
 
     return merged;

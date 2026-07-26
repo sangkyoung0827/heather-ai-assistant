@@ -51,9 +51,8 @@ const AI_MODE_OPTIONS: Array<{
 ];
 
 const LANGUAGE_OPTIONS: Array<{ value: HeatherLanguage; label: string; detail: string }> = [
-  { value: "en", label: "English", detail: "Default" },
-  { value: "ko", label: "한국어", detail: "Korean first" },
-  { value: "auto", label: "Auto", detail: "Follow user" }
+  { value: "ko", label: "한국어", detail: "기본 언어" },
+  { value: "en", label: "English", detail: "English first" }
 ];
 
 const VOICE_PROVIDER_OPTIONS: Array<{ value: HeatherVoiceProvider; label: string }> = [
@@ -171,7 +170,7 @@ export function SettingsPanel({ settings, onSaveSettings, onClearAll }: Settings
 
         <section className="space-y-3 border-b border-line pb-4">
           <h4 className="font-semibold">말투 강도</h4>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             {TONE_OPTIONS.map((option) => (
               <button
                 key={option.value}

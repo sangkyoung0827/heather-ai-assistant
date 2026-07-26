@@ -32,9 +32,7 @@ export function buildHeatherSystemPrompt(settings: HeatherSettings): string {
   const languageInstruction =
     settings.defaultLanguage === "ko"
       ? "기본 응답 언어는 한국어다. 사용자가 영어로 말하면 자연스럽게 영어로 답할 수 있다."
-      : settings.defaultLanguage === "auto"
-        ? "사용자가 쓴 언어를 따라 답한다. 한국어와 영어를 모두 자연스럽게 사용할 수 있다."
-        : "Default response language is English. If the user writes in Korean or explicitly asks for Korean, answer naturally in Korean. You can use both Korean and English fluently.";
+      : "Default response language is English. If the user writes in Korean or explicitly asks for Korean, answer naturally in Korean. You can use both Korean and English fluently.";
 
   return [
     `너는 ${HEATHER_NAME}, 사용자의 개인 AI 비서다.`,

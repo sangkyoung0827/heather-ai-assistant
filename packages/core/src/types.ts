@@ -1,6 +1,7 @@
 export type HeatherTone = "soft" | "analytical" | "direct";
 export type HeatherAIMode = "local_only" | "local_model" | "cloud_allowed";
-export type HeatherLanguage = "en" | "ko" | "auto";
+export type HeatherLanguage = "en" | "ko";
+export type HeatherAvatarVariant = "face-01" | "face-02" | "face-03" | "face-04";
 export type HeatherVoiceProvider = "browser" | "elevenlabs";
 export type TeachingType =
   | "directive"
@@ -266,7 +267,9 @@ export interface ActionLogRecord {
 
 export interface HeatherSettings {
   accentColor: "violet" | "blue" | "cyan" | "emerald" | "amber" | "slate";
+  /** Kept while existing local settings are migrated to the face variants. */
   iconStyle: "avatar" | "orb" | "spark" | "neural";
+  avatarVariant: HeatherAvatarVariant;
   tone: HeatherTone;
   aiMode: HeatherAIMode;
   ollamaBaseUrl: string;

@@ -11,6 +11,7 @@ export function createDefaultSettings(): HeatherSettings {
   return {
     accentColor: "violet",
     iconStyle: "avatar",
+    avatarVariant: "face-01",
     tone: "analytical",
     aiMode: "local_model",
     ollamaBaseUrl: "http://localhost:11434",
@@ -20,7 +21,7 @@ export function createDefaultSettings(): HeatherSettings {
     apiCallsThisMonth: 0,
     apiUsageMonth: new Date().toISOString().slice(0, 7),
     cacheResponses: true,
-    defaultLanguage: "en",
+    defaultLanguage: "ko",
     voiceOutputEnabled: true,
     voiceAutoReadEnabled: false,
     voiceProvider: "elevenlabs",
