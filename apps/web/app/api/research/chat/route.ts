@@ -7,6 +7,7 @@ import { isValidChatPayload } from "../../../../lib/llm/messages";
 import { generateForModelRole } from "../../../../lib/llm/service";
 import { buildResearchContext } from "../../../../lib/research/context";
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
+import { runMatchedSkill } from "../../../../lib/skills/agent-runtime";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,12 @@ export async function POST(request: Request) {
       const previous = await conversations.findCompletedAssistant(turn.conversation.id, clientMessageId);
       if (previous) return NextResponse.json({ message: previous.content, title: turn.conversation.title, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: previous.id, duplicate: true });
       return NextResponse.json({ error: "이 메시지는 이미 처리 중입니다. 잠시 후 대화를 다시 열어주세요.", conversationId: turn.conversation.id }, { status: 409 });
+    }
+
+    const skill = await runMatchedSkill(payload.message, payload.settings.defaultLanguage, request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null, "research");
+    if (skill) {
+      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: skill.message, source: "skill", replyTo: clientMessageId, metadata: { provider: "agent-runtime", model: skill.skillId } });
+      return NextResponse.json({ message: skill.message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Read-only source discovery." }, mode: "research", provider: "agent-runtime", model: skill.skillId, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: assistant.id });
     }
 
     const profile = resolveModelProfile("research");

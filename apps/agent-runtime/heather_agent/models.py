@@ -29,7 +29,7 @@ class SkillDefinition(BaseModel):
     version: str
     name: str
     description: str
-    scope: Literal["personal"]
+    scope: Literal["personal", "research"]
     risk_level: Literal["low", "medium", "high", "critical"]
     required_tools: list[str]
     required_permissions: list[str]
@@ -51,6 +51,10 @@ class ToolDefinition(BaseModel):
 class RouteRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1200)
     locale: Literal["ko", "en"] = "ko"
+    space: Literal["personal", "research"] = "personal"
+    research_scope: Literal["private", "team"] = "private"
+    team_id: str | None = None
+    project_id: str | None = None
 
 
 class RouteResponse(BaseModel):
@@ -60,9 +64,13 @@ class RouteResponse(BaseModel):
 
 
 class ExecuteRequest(BaseModel):
-    skill_id: Literal["personal_memory_summary"]
+    skill_id: Literal["personal_memory_summary", "general_web_search", "research_academic_discovery", "research_web_discovery"]
     locale: Literal["ko", "en"] = "ko"
     max_memories: int | None = Field(default=None, ge=1, le=100)
+    query: str | None = Field(default=None, max_length=1200)
+    research_scope: Literal["private", "team"] = "private"
+    team_id: str | None = None
+    project_id: str | None = None
 
 
 class MemoryItem(BaseModel):
@@ -95,6 +103,5 @@ class SkillRunResponse(BaseModel):
     run_id: str
     status: RunStatus
     skill_id: str
-    result: PersonalMemorySummary | None = None
+    result: Any | None = None
     error_code: str | None = None
-

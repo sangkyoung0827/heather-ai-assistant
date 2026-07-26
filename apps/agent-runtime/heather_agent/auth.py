@@ -21,5 +21,4 @@ async def execution_context(request: Request, settings: Settings, locale: str = 
     subject = response.json().get("id")
     if not isinstance(subject, str) or not subject:
         raise HTTPException(status_code=401, detail="Invalid access token.")
-    return ExecutionContext(user_id=subject, access_token=token, permissions={"personal_memories:read"}, request_id=request.headers.get("x-request-id", "runtime"), locale="en" if locale == "en" else "ko")
-
+    return ExecutionContext(user_id=subject, access_token=token, permissions={"personal_memories:read", "web_search:read", "research_search:read"}, request_id=request.headers.get("x-request-id", "runtime"), locale="en" if locale == "en" else "ko")

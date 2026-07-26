@@ -7,6 +7,7 @@ import { createMessage } from "@heather/core";
 import type { ChatRequestPayload, HeatherSettings, MemoryRecord, MessageAttachment, ProjectRecord } from "@heather/core";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { useConversationStore } from "../../../lib/conversations/use-conversation-store";
+import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 
 type ResearchResponse = { message?: string; title?: string; conversationId?: string; error?: string };
 type UploadResponse = { conversationId?: string; attachments?: MessageAttachment[]; error?: string };
@@ -81,7 +82,10 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
         conversationId = uploaded.conversationId; messageAlreadyPersisted = true;
       }
       const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId, conversation: activeConversation || undefined, messageAlreadyPersisted, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [] };
-      const response = await fetch("/api/research/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const session = await getSupabaseBrowserClient()?.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.data.session?.access_token) headers.Authorization = `Bearer ${session.data.session.access_token}`;
+      const response = await fetch("/api/research/chat", { method: "POST", headers, body: JSON.stringify(payload) });
       const data = await response.json() as ResearchResponse;
       if (!response.ok || !data.message || !data.conversationId) throw new Error(data.error || copy.sendFailed);
       applyOptimistic(createMessage("assistant", data.message, "text", { provider: "nvidia" }));

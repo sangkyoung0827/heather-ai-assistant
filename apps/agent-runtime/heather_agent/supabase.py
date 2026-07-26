@@ -1,5 +1,6 @@
 from datetime import datetime
 from urllib.parse import quote
+from hashlib import sha256
 import httpx
 from .config import Settings
 from .models import ExecutionContext, MemoryItem, MemoryPage, RunStatus, SkillRunResponse
@@ -60,10 +61,29 @@ class SupabaseGateway:
         result = row.get("output_metadata", {}).get("result") if isinstance(row.get("output_metadata"), dict) else None
         return SkillRunResponse(run_id=str(row["id"]), status=RunStatus(row["status"]), skill_id=str(row["skill_id"]), result=result, error_code=row.get("error_code"))
 
+    async def validate_research_scope(self, context: ExecutionContext, scope: str, team_id: str | None, project_id: str | None) -> None:
+        if scope == "private":
+            if team_id or project_id:
+                raise PermissionError("invalid_private_scope")
+            return
+        if not team_id or not project_id:
+            raise PermissionError("team_and_project_required")
+        url = f"{self.settings.supabase_url.rstrip('/')}/rest/v1/research_projects?id=eq.{quote(project_id)}&team_id=eq.{quote(team_id)}&select=id"
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, headers=self.headers(context))
+        response.raise_for_status()
+        if not response.json():
+            raise PermissionError("research_scope_denied")
+
+    async def log_research_search(self, context: ExecutionContext, scope: str, team_id: str | None, project_id: str | None, provider: str, query: str, result_count: int) -> None:
+        payload = {"user_id": context.user_id, "scope": scope, "team_id": team_id if scope == "team" else None, "project_id": project_id if scope == "team" else None, "provider": provider, "query_hash": sha256(query.encode()).hexdigest(), "result_count": result_count}
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(f"{self.settings.supabase_url.rstrip('/')}/rest/v1/research_search_runs", headers={**self.headers(context), "Prefer": "return=minimal"}, json=payload)
+        response.raise_for_status()
+
 
 def parse_count(content_range: str | None) -> int:
     try:
         return int((content_range or "*/0").split("/")[-1])
     except ValueError:
         return 0
-
