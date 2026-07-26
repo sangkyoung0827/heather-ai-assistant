@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
+import type { ConversationType } from "../../../../lib/conversations/types";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,7 @@ export async function POST(request: Request) {
     const content = String(form.get("message") || "").trim();
     const clientMessageId = String(form.get("clientMessageId") || "").trim();
     const conversationId = String(form.get("conversationId") || "").trim() || undefined;
+    const type = parseType(form.get("type"));
     const files = form.getAll("files").filter((item): item is File => item instanceof File);
     if (!clientMessageId || !files.length || files.length > MAX_FILES) return NextResponse.json({ error: "Invalid media message." }, { status: 400 });
     if (files.some((file) => file.size <= 0 || file.size > MAX_FILE_BYTES) || files.reduce((total, file) => total + file.size, 0) > MAX_TOTAL_BYTES) {
@@ -28,8 +30,8 @@ export async function POST(request: Request) {
     await repository.ensureMediaBucket();
     const turn = await repository.beginMessage({
       conversationId,
-      type: "general",
-      title: createConversationTitle(content || "사진", "general"),
+      type,
+      title: createConversationTitle(content || "사진", type),
       content,
       clientMessageId,
       allowEmpty: true
@@ -61,6 +63,10 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: publicError(error) }, { status: 422 });
   }
+}
+
+function parseType(value: FormDataEntryValue | null): ConversationType {
+  return value === "research" ? "research" : "general";
 }
 
 async function validateImage(file: File) {

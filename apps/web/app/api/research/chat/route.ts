@@ -20,7 +20,9 @@ export async function POST(request: Request) {
     const clientMessageId = payload.clientMessageId || payload.messageId;
     if (!clientMessageId) return NextResponse.json({ error: "clientMessageId is required." }, { status: 400 });
     const conversations = new ConversationRepository();
-    turn = await conversations.beginMessage({ conversationId: payload.conversationId, type: "research", title: createConversationTitle(payload.message, "research"), content: payload.message, clientMessageId });
+    turn = payload.messageAlreadyPersisted && payload.conversationId
+      ? await conversations.getStoredTurn({ conversationId: payload.conversationId, type: "research", clientMessageId })
+      : await conversations.beginMessage({ conversationId: payload.conversationId, type: "research", title: createConversationTitle(payload.message, "research"), content: payload.message, clientMessageId });
     if (turn.duplicate) {
       const previous = await conversations.findCompletedAssistant(turn.conversation.id, clientMessageId);
       if (previous) return NextResponse.json({ message: previous.content, title: turn.conversation.title, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: previous.id, duplicate: true });

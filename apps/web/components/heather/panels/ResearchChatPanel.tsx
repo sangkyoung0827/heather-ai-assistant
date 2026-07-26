@@ -1,69 +1,90 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- local previews and short-lived signed attachment URLs are runtime-only. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, MessageSquarePlus, Search, Send, Trash2 } from "lucide-react";
+import { FlaskConical, ImagePlus, Loader2, MessageSquarePlus, Search, Send, Smile, Trash2, X } from "lucide-react";
 import { createMessage } from "@heather/core";
-import type { ChatRequestPayload, HeatherSettings, MemoryRecord, ProjectRecord } from "@heather/core";
+import type { ChatRequestPayload, HeatherSettings, MemoryRecord, MessageAttachment, ProjectRecord } from "@heather/core";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { useConversationStore } from "../../../lib/conversations/use-conversation-store";
 
 type ResearchResponse = { message?: string; title?: string; conversationId?: string; error?: string };
+type UploadResponse = { conversationId?: string; attachments?: MessageAttachment[]; error?: string };
+type DraftAttachment = { id: string; file: File; previewUrl: string };
+const EMOJIS = ["🧪", "🔬", "📊", "🧬", "⚗️", "💡", "✅", "📌"];
 
 export function ResearchChatPanel({ memories, projects, settings }: { memories: MemoryRecord[]; projects: ProjectRecord[]; settings: HeatherSettings }) {
   const { conversations, activeConversation, activeConversationId, loading, selectConversation, setNewConversation, refreshAfterSend, archiveConversation, applyOptimistic, searchConversations, loadMore, loadOlderMessages } = useConversationStore("research");
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
   const lockRef = useRef(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const locale = settings.defaultLanguage;
+  const copy = locale === "en" ? EN : KO;
   const researchMemories = useMemo(() => memories.filter((memory) => !memory.archived && (memory.type === "project_context" || memory.source.startsWith("research"))), [memories]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => { void searchConversations(search); }, 180);
-    return () => window.clearTimeout(timer);
-  }, [search, searchConversations]);
+  useEffect(() => { const timer = window.setTimeout(() => { void searchConversations(search); }, 180); return () => window.clearTimeout(timer); }, [search, searchConversations]);
+  useEffect(() => { const area = textareaRef.current; if (!area) return; area.style.height = "0px"; area.style.height = `${Math.min(area.scrollHeight, 128)}px`; }, [draft]);
+  useEffect(() => () => attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl)), [attachments]);
+
+  function addFiles(files: FileList | File[]) {
+    const next = Array.from(files).filter((file) => ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type) && file.size <= 10 * 1024 * 1024).slice(0, 10 - attachments.length);
+    setAttachments((current) => [...current, ...next.map((file) => ({ id: `${Date.now()}-${file.name}-${Math.random()}`, file, previewUrl: URL.createObjectURL(file) }))]);
+  }
+
+  function removeAttachment(id: string) { setAttachments((current) => { const found = current.find((attachment) => attachment.id === id); if (found) URL.revokeObjectURL(found.previewUrl); return current.filter((attachment) => attachment.id !== id); }); }
+  function insertEmoji(emoji: string) { const input = textareaRef.current; const start = input?.selectionStart ?? draft.length; const end = input?.selectionEnd ?? draft.length; setDraft(`${draft.slice(0, start)}${emoji}${draft.slice(end)}`); setShowEmoji(false); requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + emoji.length, start + emoji.length); }); }
 
   async function send() {
     const message = draft.trim();
-    if (!message || isSending || lockRef.current) return;
-    lockRef.current = true;
-    setIsSending(true);
-    setDraft("");
-    const userMessage = createMessage("user", message);
-    applyOptimistic(userMessage);
-    const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId: activeConversation?.id?.startsWith("pending-") ? undefined : activeConversation?.id, conversation: activeConversation || undefined, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [] };
+    if ((!message && !attachments.length) || isSending || lockRef.current) return;
+    lockRef.current = true; setIsSending(true); setDraft(""); setShowEmoji(false);
+    const userMessage = createMessage("user", message, "text", { attachments: attachments.map((attachment) => ({ id: attachment.id, type: "image", storagePath: "", mimeType: attachment.file.type, sizeBytes: attachment.file.size, status: "ready", url: attachment.previewUrl })) });
+    const files = attachments.map((attachment) => attachment.file);
+    setAttachments([]); applyOptimistic(userMessage);
     try {
+      let conversationId = activeConversation?.id?.startsWith("pending-") ? undefined : activeConversation?.id;
+      let messageAlreadyPersisted = false;
+      if (files.length) {
+        const form = new FormData(); form.set("message", message); form.set("clientMessageId", userMessage.id); form.set("type", "research"); if (conversationId) form.set("conversationId", conversationId); files.forEach((file) => form.append("files", file));
+        const upload = await fetch("/api/conversations/media", { method: "POST", body: form });
+        const uploaded = await upload.json() as UploadResponse;
+        if (!upload.ok || !uploaded.conversationId) throw new Error(uploaded.error || copy.uploadFailed);
+        conversationId = uploaded.conversationId; messageAlreadyPersisted = true;
+      }
+      const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId, conversation: activeConversation || undefined, messageAlreadyPersisted, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [] };
       const response = await fetch("/api/research/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await response.json() as ResearchResponse;
-      if (!response.ok || !data.message || !data.conversationId) throw new Error(data.error || "Research chat request failed.");
-      applyOptimistic(createMessage("assistant", data.message));
+      if (!response.ok || !data.message || !data.conversationId) throw new Error(data.error || copy.sendFailed);
+      applyOptimistic(createMessage("assistant", data.message, "text", { provider: "nvidia" }));
       await refreshAfterSend(data.conversationId);
     } catch (error) {
-      applyOptimistic({ ...createMessage("assistant", `연구 응답을 완성하지 못했습니다. ${error instanceof Error ? error.message : "잠시 후 다시 시도해주세요."}`), status: "failed" });
-    } finally {
-      lockRef.current = false;
-      setIsSending(false);
-    }
+      applyOptimistic({ ...createMessage("assistant", `${copy.failed} ${error instanceof Error ? error.message : copy.retry}`), status: "failed" });
+    } finally { lockRef.current = false; setIsSending(false); }
   }
 
-  return <div className="chat-workspace research-chat-workspace">
-    <aside className="chat-conversation-panel">
-      <div className="chat-list-toolbar">
-        <button type="button" className="chat-new-conversation" onClick={() => { void setNewConversation(); setDraft(""); }}><MessageSquarePlus className="h-4 w-4" /> 새 연구 대화</button>
-        <label className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="연구 대화 검색" className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm" /></label>
-      </div>
-      <div className="chat-list-section"><span>최근 연구 주제</span></div>
-      <div className="chat-conversation-list heather-scrollbar">
-        {conversations.length ? conversations.map((conversation) => <button key={conversation.id} type="button" onClick={() => void selectConversation(conversation.id)} className={`chat-conversation-row group ${activeConversationId === conversation.id ? "border-heather-500 bg-white" : "border-line bg-white hover:border-heather-300"}`}><span className="block truncate text-sm font-semibold">{conversation.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{conversation.preview || "아직 메시지가 없습니다."}</span><span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); void archiveConversation(conversation.id); }} className="mt-2 grid h-7 w-7 place-items-center rounded-md text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100" aria-label="연구 대화 보관"><Trash2 className="h-3.5 w-3.5" /></span></button>) : <p className="chat-list-empty">{loading ? "연구 대화를 불러오는 중입니다." : "저장된 연구 대화가 없습니다."}</p>}
-        <button type="button" className="chat-load-more" onClick={() => void loadMore()}>더 보기</button>
-      </div>
+  return <div className="research-chat-shell" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
+    <aside className="research-conversation-panel">
+      <header className="research-list-header"><div><p>{copy.conversations}</p><h2>{copy.researchChat}</h2></div><button type="button" onClick={() => { void setNewConversation(); setDraft(""); }} aria-label={copy.newConversation} title={copy.newConversation}><MessageSquarePlus /></button></header>
+      <label className="research-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={copy.search} /></label>
+      <div className="research-conversation-list heather-scrollbar">{conversations.length ? conversations.map((conversation) => <button key={conversation.id} type="button" onClick={() => void selectConversation(conversation.id)} className={`research-conversation-row ${activeConversationId === conversation.id ? "is-active" : ""}`}><span className="research-conversation-mark"><FlaskConical /></span><span><strong>{conversation.title}</strong><small>{conversation.preview || copy.noMessages}</small><time>{formatDate(conversation.updatedAt, locale)}</time></span><i role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); void archiveConversation(conversation.id); }} onKeyDown={(event) => { if (event.key === "Enter") { event.stopPropagation(); void archiveConversation(conversation.id); } }} aria-label={copy.archive}><Trash2 /></i></button>) : <p className="research-list-empty">{loading ? copy.loading : copy.emptyConversations}</p>}{conversations.length ? <button type="button" className="research-load-more" onClick={() => void loadMore()}>{copy.loadMore}</button> : null}</div>
     </aside>
-    <section className="chat-main-panel">
-      <div className="chat-main-header"><div><h3>{activeConversation?.title || "새 연구 대화"}</h3><p>연구자료, 실험 기록과 생산 공정을 분석하는 전문 작업 공간입니다.</p></div><span className="chat-status-dot"><span />Researcher</span></div>
-      <div className="chat-message-area heather-scrollbar">
-        {activeConversation?.messages.length ? <><button type="button" className="chat-load-more" onClick={() => void loadOlderMessages()}>이전 메시지 불러오기</button>{activeConversation.messages.map((message) => <article key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}><div className={`chat-message max-w-[880px] ${message.role === "user" ? "border-heather-500 bg-heather-700 text-white" : "border-line bg-white text-ink"}`}><div className="whitespace-pre-wrap">{message.content}</div>{message.status === "failed" ? <button type="button" className="chat-retry" onClick={() => setDraft(message.content)}>다시 시도</button> : null}</div></article>)}</> : <div className="chat-welcome"><div className="chat-welcome-icon"><HeatherAvatar settings={settings} size="medium" researcher /></div><h2>무엇을 연구할까요?</h2><p>사람·조직 구조 분석, 실험 결과 해석, 가설 설정, 연구 메모 정리와 생산 공정 검토를 요청하세요.</p><div className="chat-suggestions">{["사람·조직 구조를 분석해줘", "실험 조건을 비교해줘", "연구 가설을 설정해줘", "연구 메모를 정리해줘", "생산 공정을 검토해줘"].map((prompt) => <button key={prompt} type="button" onClick={() => setDraft(prompt)}>{prompt}<span>›</span></button>)}</div></div>}
-        {isSending && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Heather Researcher가 분석하고 있습니다.</div>}
-      </div>
-      <div className="chat-composer-wrap"><div className="chat-composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="연구자료, 실험 결과 또는 생산 공정에 대해 질문하세요." className="min-h-12 flex-1 resize-none rounded-lg border border-line bg-white px-3 py-3 text-sm leading-5" rows={1} /><button type="button" onClick={() => void send()} disabled={!draft.trim() || isSending} className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-heather-700 bg-heather-700 text-white disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-300" aria-label="연구 요청 보내기">{isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button></div></div>
+    <section className="research-chat-main">
+      <header className="research-chat-header"><div><span className="research-header-badge"><FlaskConical />{copy.researcher}</span><h2>{activeConversation?.title || copy.newResearch}</h2></div><HeatherAvatar settings={settings} size="medium" researcher /></header>
+      <div className="research-message-area heather-scrollbar">{activeConversation?.messages.length ? <><button type="button" className="research-load-more" onClick={() => void loadOlderMessages()}>{copy.loadOlder}</button><div className="research-thread">{activeConversation.messages.map((message) => <ResearchMessage key={message.id} message={message} settings={settings} onRetry={() => setDraft(message.content)} />)}</div></> : <ResearchWelcome settings={settings} copy={copy} onPrompt={setDraft} />}{isSending ? <div className="research-thinking"><Loader2 />{copy.thinking}</div> : null}</div>
+      <footer className="research-composer-wrap">{attachments.length ? <div className="research-attachment-strip">{attachments.map((attachment) => <div key={attachment.id}><img src={attachment.previewUrl} alt="" /><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={copy.removePhoto}><X /></button></div>)}</div> : null}<div className="research-composer"><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.photos} title={copy.photos}><ImagePlus /></button><input ref={imageInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} /><span className="research-emoji-wrap"><button type="button" onClick={() => setShowEmoji((open) => !open)} aria-label={copy.emoji} title={copy.emoji}><Smile /></button>{showEmoji ? <span className="research-emoji-picker">{EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</span> : null}</span><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); addFiles(event.clipboardData.files); } }} placeholder={copy.placeholder} rows={1} /><button type="button" onClick={() => void send()} disabled={(!draft.trim() && !attachments.length) || isSending} className="research-send" aria-label={copy.send}>{isSending ? <Loader2 /> : <Send />}</button></div></footer>
     </section>
   </div>;
 }
+
+function ResearchWelcome({ settings, copy, onPrompt }: { settings: HeatherSettings; copy: typeof KO; onPrompt: (value: string) => void }) { return <div className="research-welcome"><div className="research-welcome-avatar"><HeatherAvatar settings={settings} size="large" researcher /><FlaskConical /></div><p>{copy.researcher}</p><h2>Heather Researcher</h2><span>{copy.welcome}</span><div>{copy.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => onPrompt(prompt)}>{prompt}</button>)}</div></div>; }
+function ResearchMessage({ message, settings, onRetry }: { message: { role: string; content: string; status?: string; attachments?: MessageAttachment[] }; settings: HeatherSettings; onRetry: () => void }) { const isUser = message.role === "user"; return <article className={`research-message ${isUser ? "is-user" : "is-heather"}`}>{!isUser ? <HeatherAvatar settings={settings} size="small" researcher /> : null}<div>{message.attachments?.length ? <div className="research-image-grid">{message.attachments.map((attachment) => attachment.url ? <img key={attachment.id} src={attachment.url} alt="" /> : null)}</div> : null}{message.content ? <div className="research-message-content">{renderResearchContent(message.content)}</div> : null}{message.status === "failed" ? <button type="button" className="research-retry" onClick={onRetry}>다시 시도</button> : null}</div></article>; }
+function renderResearchContent(content: string) { return content.split(/\n{2,}/).map((block, index) => { const heading = block.match(/^\[([^\]]+)\]\s*\n?([\s\S]*)$/); return heading ? <section key={index} className="research-report-section"><strong>{heading[1]}</strong><p>{heading[2]}</p></section> : <p key={index}>{block}</p>; }); }
+function formatDate(value: string, locale: "ko" | "en") { return new Intl.DateTimeFormat(locale === "ko" ? "ko-KR" : "en-US", { month: "short", day: "numeric" }).format(new Date(value)); }
+
+const KO = { researcher: "Heather Researcher", conversations: "연구 대화", researchChat: "연구원 채팅", newConversation: "새 연구 대화", newResearch: "새 연구 대화", search: "연구 대화 검색", noMessages: "아직 메시지가 없습니다.", archive: "연구 대화 보관", loading: "연구 대화를 불러오는 중입니다.", emptyConversations: "저장된 연구 대화가 없습니다.", loadMore: "더 보기", loadOlder: "이전 메시지 불러오기", welcome: "실험 결과, 연구 가설, 논문 내용과 생산 데이터를 함께 검토할 수 있어요.", prompts: ["실험 결과 해석", "연구 가설 정리", "연구 메모 작성", "변수 간 관계 분석", "후속 실험 설계"], thinking: "Heather Researcher가 분석하고 있습니다.", placeholder: "연구 질문이나 실험 내용을 입력하세요...", photos: "사진", removePhoto: "첨부 사진 제거", emoji: "이모지 선택", send: "연구 요청 보내기", uploadFailed: "사진을 업로드하지 못했습니다.", sendFailed: "연구 요청을 보내지 못했습니다.", failed: "연구 응답을 완성하지 못했습니다.", retry: "잠시 후 다시 시도해주세요." };
+const EN = { researcher: "Heather Researcher", conversations: "Research conversations", researchChat: "Research chat", newConversation: "New research conversation", newResearch: "New research conversation", search: "Search research conversations", noMessages: "No messages yet.", archive: "Archive research conversation", loading: "Loading research conversations...", emptyConversations: "No saved research conversations.", loadMore: "Load more", loadOlder: "Load older messages", welcome: "Review experiment results, research hypotheses, papers, and production data together.", prompts: ["Interpret experiment results", "Organize a research hypothesis", "Write a research note", "Analyze variable relationships", "Plan a follow-up experiment"], thinking: "Heather Researcher is analyzing.", placeholder: "Enter a research question or experiment note...", photos: "Photos", removePhoto: "Remove attached photo", emoji: "Choose emoji", send: "Send research request", uploadFailed: "Could not upload the photo.", sendFailed: "Could not send the research request.", failed: "Could not complete the research response.", retry: "Please try again shortly." };
