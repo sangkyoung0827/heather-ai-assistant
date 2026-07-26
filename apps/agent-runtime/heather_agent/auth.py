@@ -5,6 +5,8 @@ from .models import ExecutionContext
 
 
 async def execution_context(request: Request, settings: Settings, locale: str = "ko") -> ExecutionContext:
+    if settings.agent_runtime_internal_token and request.headers.get("x-agent-runtime-token") != settings.agent_runtime_internal_token:
+        raise HTTPException(status_code=401, detail="Invalid runtime token.")
     authorization = request.headers.get("authorization", "")
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication is required.")

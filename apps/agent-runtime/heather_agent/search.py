@@ -91,6 +91,9 @@ class BaseProvider:
     async def get_quota_status(self) -> dict[str, str]:
         return {"provider": self.name, "mode": "free", "status": "available" if self.enabled else "not_configured"}
 
+    async def fetch_by_id(self, identifier: str) -> ResearchSource | None:
+        return None
+
 
 class SearxngProvider(BaseProvider):
     name = "searxng"

@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     supabase_url: str
     supabase_anon_key: str
+    agent_runtime_internal_token: str | None = None
     nvidia_api_key: str | None = None
     nvidia_api_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_memory_summary_model: str | None = None

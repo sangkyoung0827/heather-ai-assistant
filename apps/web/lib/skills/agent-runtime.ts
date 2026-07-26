@@ -7,7 +7,8 @@ const MIN_SKILL_CONFIDENCE = 0.85;
 export async function runMatchedSkill(message: string, locale: "ko" | "en", accessToken: string | null, space: "personal" | "research" = "personal"): Promise<{ message: string; skillId: string } | null> {
   const baseUrl = process.env.AGENT_RUNTIME_URL?.replace(/\/$/, "");
   if (!baseUrl || !accessToken) return null;
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` };
+  const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` };
+  if (process.env.AGENT_RUNTIME_INTERNAL_TOKEN) headers["X-Agent-Runtime-Token"] = process.env.AGENT_RUNTIME_INTERNAL_TOKEN;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 35000);
   try {

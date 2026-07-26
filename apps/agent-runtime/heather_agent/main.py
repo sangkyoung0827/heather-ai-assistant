@@ -35,8 +35,17 @@ async def context_for(request: Request, locale: str = "ko") -> ExecutionContext:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "nemo_agent_toolkit": version("nvidia-nat")}
+async def health() -> dict:
+    providers = {
+        "searxng": {"status": "configured" if search_workflow.searxng.enabled else "not_configured"},
+        "openalex": {"status": "configured" if settings.openalex_api_key else "free_no_key"},
+        "crossref": {"status": "configured" if settings.crossref_mailto else "free_no_contact"},
+        "pubmed": {"status": "configured" if settings.ncbi_api_key else "free_low_rate"},
+        "europe_pmc": {"status": "configured"},
+        "unpaywall": {"status": "configured" if settings.unpaywall_email else "not_configured"},
+        "semantic_scholar": {"status": "configured" if settings.semantic_scholar_api_key else "free_low_rate"},
+    }
+    return {"status": "ok", "version": app.version, "nemo_agent_toolkit": version("nvidia-nat"), "providers": providers, "paid_fallback_enabled": False}
 
 
 @app.post("/v1/skills/route", response_model=RouteResponse)
