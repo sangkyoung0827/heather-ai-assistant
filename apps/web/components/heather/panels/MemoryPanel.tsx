@@ -11,11 +11,12 @@ interface MemoryPanelProps {
   locale?: HeatherLanguage;
   onSaveMemory: (memory: MemoryRecord) => Promise<void>;
   onDeleteMemory: (id: string) => Promise<void>;
+  auth?: { user: { email?: string | null } | null; ready: boolean; configured: boolean; signInWithGoogle: () => Promise<void>; signOut: () => Promise<void> };
 }
 
 const PAGE_SIZE = 30;
 
-export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemory, onDeleteMemory }: MemoryPanelProps) {
+export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemory, onDeleteMemory, auth }: MemoryPanelProps) {
   const isResearch = variant === "research";
   const [resolvedLocale, setResolvedLocale] = useState<HeatherLanguage>(locale || "ko");
   const copy = isResearch ? (resolvedLocale === "en" ? EN_RESEARCH : KO_RESEARCH) : (resolvedLocale === "en" ? EN : KO);
@@ -103,9 +104,11 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
     } finally { setSaving(false); }
   }
 
+  if (auth && (!auth.ready || !auth.user)) return <MemoryAuthGate copy={copy} auth={auth} />;
+
   return <div className={`memory-workspace simple-memory-workspace ${mobileView === "editor" ? "is-mobile-editor" : "is-mobile-list"}`}>
     <aside className="memory-browser simple-memory-list">
-      <header className="simple-memory-list-header"><div><h2>{copy.title}</h2><p>{countLabel(scopedMemories.length, resolvedLocale)}</p></div></header>
+      <header className="simple-memory-list-header"><div><h2>{copy.title}</h2><p>{countLabel(scopedMemories.length, resolvedLocale)}</p></div>{auth?.user ? <button type="button" className="memory-sign-out" onClick={() => void auth.signOut()}>{copy.signOut}</button> : null}</header>
       <form className="simple-memory-search" onSubmit={(event) => { event.preventDefault(); applySearch(); }}><Search /><input value={draftQuery} onChange={(event) => setDraftQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /><button type="submit" className="sr-only">{copy.search}</button></form>
       <div className="memory-list heather-scrollbar simple-memory-items">
         {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}><span className="simple-memory-content">{memory.content}</span><time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
@@ -123,6 +126,7 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
 }
 
 function MemoryEmpty({ query, copy }: { query: boolean; copy: Copy }) { return <div className="simple-memory-empty"><strong>{query ? copy.noResults : copy.emptyTitle}</strong><p>{query ? "" : copy.emptyDescription}</p></div>; }
+function MemoryAuthGate({ copy, auth }: { copy: Copy; auth: NonNullable<MemoryPanelProps["auth"]> }) { return <section className="memory-auth-gate"><div><h2>{copy.signInTitle}</h2><p>{auth.configured ? copy.signInDescription : copy.notConfigured}</p>{auth.configured ? <button type="button" onClick={() => void auth.signInWithGoogle()}>{copy.continueGoogle}</button> : null}</div></section>; }
 
 function DeleteDialog({ copy, onCancel, onDelete, loading }: { copy: Copy; onCancel: () => void; onDelete: () => void; loading: boolean }) { return <div className="simple-memory-modal-backdrop" role="presentation"><section className="simple-memory-modal" role="dialog" aria-modal="true" aria-labelledby="memory-delete-title"><button type="button" className="simple-memory-modal-close" onClick={onCancel} aria-label={copy.cancel}><X /></button><h2 id="memory-delete-title">{copy.deleteTitle}</h2><p>{copy.deleteDescription}</p><footer><button type="button" className="simple-memory-delete" onClick={onCancel}>{copy.cancel}</button><button type="button" className="simple-memory-save is-danger" onClick={onDelete} disabled={loading}>{loading ? <Loader2 className="animate-spin" /> : null}{copy.delete}</button></footer></section></div>; }
 
@@ -139,8 +143,8 @@ function buildMemoryMetadata(content: string, variant: "personal" | "research"):
   return { type, source: "personal", tags };
 }
 
-const KO = { title: "개인 메모리", search: "개인 메모리 검색", content: "내용", placeholder: "Heather가 기억할 내용을 입력하세요.", save: "저장", saving: "저장 중...", delete: "삭제", cancel: "취소", edit: "개인 메모리", newMemory: "새 개인 메모리", editorHint: "자연어로 기억할 내용을 작성하세요.", emptyTitle: "아직 등록된 개인 메모리가 없습니다.", emptyDescription: "오른쪽 입력창에서 기억할 내용을 등록하세요.", noResults: "검색 결과가 없습니다.", loadMore: "더 보기", saveFailed: "저장하지 못했습니다. 내용을 유지한 채 다시 시도할 수 있습니다.", deleteFailed: "삭제하지 못했습니다. 다시 시도해주세요.", deleteTitle: "개인 메모리를 삭제할까요?", deleteDescription: "삭제한 메모리는 복구할 수 없습니다.", back: "메모리 목록으로" };
-const EN = { title: "Personal Memories", search: "Search personal memories", content: "Content", placeholder: "Enter something Heather should remember.", save: "Save", saving: "Saving...", delete: "Delete", cancel: "Cancel", edit: "Personal memory", newMemory: "New personal memory", editorHint: "Write naturally what Heather should remember.", emptyTitle: "No personal memories yet.", emptyDescription: "Add something to remember using the editor.", noResults: "No memories found.", loadMore: "Load more", saveFailed: "Could not save this memory. Your text is still here to retry.", deleteFailed: "Could not delete this memory. Please try again.", deleteTitle: "Delete this personal memory?", deleteDescription: "This action cannot be undone.", back: "Back to memories" };
+const KO = { title: "개인 메모리", search: "개인 메모리 검색", content: "내용", placeholder: "Heather가 기억할 내용을 입력하세요.", save: "저장", saving: "저장 중...", delete: "삭제", cancel: "취소", edit: "개인 메모리", newMemory: "새 개인 메모리", editorHint: "자연어로 기억할 내용을 작성하세요.", emptyTitle: "아직 등록된 개인 메모리가 없습니다.", emptyDescription: "오른쪽 입력창에서 기억할 내용을 등록하세요.", noResults: "검색 결과가 없습니다.", loadMore: "더 보기", saveFailed: "저장하지 못했습니다. 내용을 유지한 채 다시 시도할 수 있습니다.", deleteFailed: "삭제하지 못했습니다. 다시 시도해주세요.", deleteTitle: "개인 메모리를 삭제할까요?", deleteDescription: "삭제한 메모리는 복구할 수 없습니다.", back: "메모리 목록으로", signInTitle: "메모리를 사용하려면 로그인하세요.", signInDescription: "개인 메모리는 Google 로그인 사용자별로 안전하게 분리됩니다.", continueGoogle: "Google로 계속하기", notConfigured: "메모리 인증이 아직 구성되지 않았습니다.", signOut: "로그아웃" };
+const EN = { title: "Personal Memories", search: "Search personal memories", content: "Content", placeholder: "Enter something Heather should remember.", save: "Save", saving: "Saving...", delete: "Delete", cancel: "Cancel", edit: "Personal memory", newMemory: "New personal memory", editorHint: "Write naturally what Heather should remember.", emptyTitle: "No personal memories yet.", emptyDescription: "Add something to remember using the editor.", noResults: "No memories found.", loadMore: "Load more", saveFailed: "Could not save this memory. Your text is still here to retry.", deleteFailed: "Could not delete this memory. Please try again.", deleteTitle: "Delete this personal memory?", deleteDescription: "This action cannot be undone.", back: "Back to memories", signInTitle: "Sign in to use memory.", signInDescription: "Personal memories are safely separated for each Google account.", continueGoogle: "Continue with Google", notConfigured: "Memory authentication is not configured yet.", signOut: "Sign out" };
 const KO_RESEARCH = { ...KO, title: "연구 메모리", search: "연구 메모리 검색", placeholder: "Heather가 기억할 연구 내용을 입력하세요.", edit: "연구 메모리", newMemory: "새 연구 메모리", editorHint: "연구 내용, 측정값, 결과를 자연어로 작성하세요.", emptyTitle: "아직 등록된 연구 메모리가 없습니다.", emptyDescription: "오른쪽 입력창에서 기억할 연구 내용을 등록하세요.", noResults: "검색 결과가 없습니다.", deleteTitle: "연구 메모리를 삭제할까요?", back: "연구 메모리 목록으로" };
 const EN_RESEARCH = { ...EN, title: "Research Memories", search: "Search research memories", placeholder: "Enter research information Heather should remember.", edit: "Research memory", newMemory: "New research memory", editorHint: "Write research notes, measurements, and results naturally.", emptyTitle: "No research memories yet.", emptyDescription: "Add research information using the editor.", noResults: "No research memories found.", deleteTitle: "Delete this research memory?", back: "Back to research memories" };
 type Copy = typeof KO;

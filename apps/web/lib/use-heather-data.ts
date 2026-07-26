@@ -10,6 +10,9 @@ import type {
   TeachingRecord
 } from "@heather/core";
 import { BrowserHeatherDatabase, createDefaultSettings } from "@heather/db";
+import type { User } from "@supabase/supabase-js";
+import { SupabaseMemoryRepository } from "./memory-repository";
+import { getSupabaseBrowserClient } from "./supabase-client";
 
 function sortByUpdated<T extends { updated_at?: string; updatedAt?: string; created_at?: string; createdAt?: string }>(
   items: T[]
@@ -23,6 +26,7 @@ function sortByUpdated<T extends { updated_at?: string; updatedAt?: string; crea
 
 export function useHeatherData() {
   const db = useMemo(() => new BrowserHeatherDatabase(), []);
+  const memoryRepository = useMemo(() => new SupabaseMemoryRepository(), []);
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState<HeatherSettings>(createDefaultSettings());
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -30,20 +34,20 @@ export function useHeatherData() {
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [teachings, setTeachings] = useState<TeachingRecord[]>([]);
   const [automationRecipes, setAutomationRecipes] = useState<AutomationRecipe[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const reload = useCallback(async () => {
     const [
       nextSettings,
       nextConversations,
       nextProjects,
-      nextMemories,
       nextTeachings,
       nextAutomationRecipes
     ] = await Promise.all([
       db.getSettings(),
       db.listConversations(),
       db.listProjects(),
-      db.listMemories(),
       db.listTeachings(),
       db.listAutomationRecipes()
     ]);
@@ -51,15 +55,31 @@ export function useHeatherData() {
     setSettings(nextSettings);
     setConversations(sortByUpdated(nextConversations));
     setProjects(sortByUpdated(nextProjects));
-    setMemories(sortByUpdated(nextMemories));
+    setMemories([]);
     setTeachings(sortByUpdated(nextTeachings));
     setAutomationRecipes(sortByUpdated(nextAutomationRecipes));
     setReady(true);
   }, [db]);
 
+  const reloadMemories = useCallback(async (nextUser: User | null) => {
+    if (!nextUser) { setMemories([]); return; }
+    try {
+      const [personal, research] = await Promise.all([memoryRepository.listPersonal(), memoryRepository.listPrivateResearch()]);
+      setMemories(sortByUpdated([...personal, ...research]));
+    } catch { setMemories([]); }
+  }, [memoryRepository]);
+
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    const client = getSupabaseBrowserClient();
+    if (!client) { setAuthReady(true); return; }
+    void client.auth.getUser().then(({ data }) => { setUser(data.user); setAuthReady(true); void reloadMemories(data.user); });
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => { setUser(session?.user || null); setAuthReady(true); void reloadMemories(session?.user || null); });
+    return () => listener.subscription.unsubscribe();
+  }, [reloadMemories]);
 
   const saveSettings = useCallback(
     async (nextSettings: HeatherSettings) => {
@@ -103,18 +123,19 @@ export function useHeatherData() {
 
   const saveMemory = useCallback(
     async (memory: MemoryRecord) => {
-      setMemories((current) => sortByUpdated(upsert(current, memory)));
-      await db.saveMemory(memory);
+      const saved = memory.source.startsWith("research") || memory.type === "project_context" ? await memoryRepository.savePrivateResearch(memory) : await memoryRepository.savePersonal(memory);
+      setMemories((current) => sortByUpdated(upsert(current, saved)));
     },
-    [db]
+    [memoryRepository]
   );
 
   const deleteMemory = useCallback(
     async (id: string) => {
+      const existing = memories.find((memory) => memory.id === id);
+      if (existing?.source.startsWith("research") || existing?.type === "project_context") await memoryRepository.deleteResearch(id); else await memoryRepository.deletePersonal(id);
       setMemories((current) => current.filter((memory) => memory.id !== id));
-      await db.deleteMemory(id);
     },
-    [db]
+    [memories, memoryRepository]
   );
 
   const saveTeaching = useCallback(
@@ -154,6 +175,14 @@ export function useHeatherData() {
     await reload();
   }, [db, reload]);
 
+  const signInWithGoogle = useCallback(async () => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured.");
+    const { error } = await client.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback` } });
+    if (error) throw error;
+  }, []);
+  const signOut = useCallback(async () => { const client = getSupabaseBrowserClient(); if (client) await client.auth.signOut(); }, []);
+
   return {
     ready,
     settings,
@@ -162,6 +191,7 @@ export function useHeatherData() {
     memories,
     teachings,
     automationRecipes,
+    auth: { user, ready: authReady, configured: Boolean(getSupabaseBrowserClient()), signInWithGoogle, signOut },
     saveSettings,
     saveConversation,
     deleteConversation,
