@@ -1,264 +1,146 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Archive, Database, Plus, Save, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trash2, X } from "lucide-react";
 import { createId, nowIso } from "@heather/core";
-import type { MemoryRecord, MemoryType } from "@heather/core";
+import type { HeatherLanguage, MemoryRecord } from "@heather/core";
 
 interface MemoryPanelProps {
   variant?: "personal" | "research";
   memories: MemoryRecord[];
+  locale?: HeatherLanguage;
   onSaveMemory: (memory: MemoryRecord) => Promise<void>;
   onDeleteMemory: (id: string) => Promise<void>;
 }
 
-const MEMORY_TYPES: MemoryType[] = [
-  "user_profile",
-  "project_context",
-  "relationship_analysis",
-  "writing_preference",
-  "decision_rule",
-  "recurring_task",
-  "important_fact"
-];
+const PAGE_SIZE = 30;
 
-export function MemoryPanel({ variant = "personal", memories, onSaveMemory, onDeleteMemory }: MemoryPanelProps) {
-  const [showArchived, setShowArchived] = useState(false);
-  const [search, setSearch] = useState("");
+export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemory, onDeleteMemory }: MemoryPanelProps) {
   const isResearch = variant === "research";
-  const title = isResearch ? "연구 메모리" : "개인 메모리";
-  const description = isResearch ? "연구 맥락, 실험 기록과 후속 조치를 관리하세요." : "Heather가 장기적으로 참고할 개인 맥락과 결정을 관리하세요.";
-  const visibleMemories = useMemo(
-    () => memories.filter((memory) => {
-      const matchesVariant = isResearch ? memory.type === "project_context" || memory.source.startsWith("research") : memory.type !== "project_context" && !memory.source.startsWith("research");
-      const matchesArchive = showArchived || !memory.archived;
-      const keyword = search.trim().toLowerCase();
-      const matchesSearch = !keyword || `${memory.source} ${memory.content} ${memory.tags.join(" ")}`.toLowerCase().includes(keyword);
-      return matchesVariant && matchesArchive && matchesSearch;
-    }),
-    [isResearch, memories, search, showArchived]
-  );
-  const [selectedId, setSelectedId] = useState<string | null>(visibleMemories[0]?.id || null);
-  const selectedMemory = useMemo(
-    () => visibleMemories.find((memory) => memory.id === selectedId) || visibleMemories[0] || null,
-    [selectedId, visibleMemories]
-  );
-  const [draft, setDraft] = useState<MemoryRecord | null>(selectedMemory);
+  const [resolvedLocale, setResolvedLocale] = useState<HeatherLanguage>(locale || "ko");
+  const copy = isResearch ? (resolvedLocale === "en" ? EN_RESEARCH : KO_RESEARCH) : (resolvedLocale === "en" ? EN : KO);
+  const [draftQuery, setDraftQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [mobileView, setMobileView] = useState<"list" | "editor">("list");
 
   useEffect(() => {
-    if (!selectedId && visibleMemories[0]) {
-      setSelectedId(visibleMemories[0].id);
-    }
-  }, [selectedId, visibleMemories]);
+    if (locale) { setResolvedLocale(locale); return; }
+    try {
+      const raw = window.localStorage.getItem("heather.ai.settings");
+      const settings = raw ? JSON.parse(raw) as { defaultLanguage?: HeatherLanguage } : null;
+      setResolvedLocale(settings?.defaultLanguage === "en" ? "en" : "ko");
+    } catch { setResolvedLocale("ko"); }
+  }, [locale]);
+
+  const scopedMemories = useMemo(() => memories.filter((memory) => inScope(memory, variant) && !memory.archived), [memories, variant]);
+  const filteredMemories = useMemo(() => {
+    const query = appliedQuery.trim().toLocaleLowerCase();
+    if (!query) return scopedMemories;
+    return scopedMemories.filter((memory) => searchableMemory(memory).includes(query));
+  }, [appliedQuery, scopedMemories]);
+  const renderedMemories = filteredMemories.slice(0, visibleCount);
+  const selected = scopedMemories.find((memory) => memory.id === selectedId) || null;
 
   useEffect(() => {
-    setDraft(selectedMemory);
-  }, [selectedMemory]);
+    const query = new URLSearchParams(window.location.search).get("q") || "";
+    setDraftQuery(query); setAppliedQuery(query);
+  }, []);
 
-  async function handleCreateMemory() {
-    const timestamp = nowIso();
-    const memory: MemoryRecord = {
-      id: createId("memory"),
-      type: isResearch ? "project_context" : "important_fact",
-      content: "",
-      source: isResearch ? "research" : "personal",
-      confidence: 0.7,
-      tags: [],
-      created_at: timestamp,
-      updated_at: timestamp,
-      archived: false
-    };
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [appliedQuery]);
 
-    await onSaveMemory(memory);
-    setSelectedId(memory.id);
+  useEffect(() => {
+    if (!selected) return;
+    setContent(selected.content);
+  }, [selected]); // Intentionally preserve unsaved content while the list refreshes.
+
+  function applySearch() {
+    const next = draftQuery.trim();
+    setAppliedQuery(next);
+    const params = new URLSearchParams(window.location.search);
+    if (next) params.set("q", next); else params.delete("q");
+    window.history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params.toString()}` : ""}`);
   }
 
-  async function handleSave() {
-    if (!draft) return;
-    await onSaveMemory({
-      ...draft,
-      updated_at: nowIso()
-    });
+  function startNewMemory() {
+    setSelectedId(null); setContent(""); setError(""); setMobileView("editor");
   }
 
-  async function handleArchive() {
-    if (!draft) return;
-    await onSaveMemory({
-      ...draft,
-      archived: !draft.archived,
-      updated_at: nowIso()
-    });
+  function selectMemory(memory: MemoryRecord) {
+    setSelectedId(memory.id); setContent(memory.content); setError(""); setMobileView("editor");
   }
 
-  async function handleDelete() {
-    if (!draft) return;
-    if (!window.confirm("이 기억을 완전히 삭제할까요?")) return;
-    await onDeleteMemory(draft.id);
-    setSelectedId(null);
+  async function save() {
+    const value = content.trim();
+    if (!value || saving) return;
+    setSaving(true); setError("");
+    try {
+      const timestamp = nowIso();
+      const generated = buildMemoryMetadata(value, variant);
+      const memory: MemoryRecord = selected
+        ? { ...selected, ...generated, content: value, updated_at: timestamp }
+        : { id: createId("memory"), content: value, created_at: timestamp, updated_at: timestamp, archived: false, confidence: .72, ...generated };
+      await onSaveMemory(memory);
+      setSelectedId(memory.id); setContent(memory.content);
+    } catch {
+      setError(copy.saveFailed);
+    } finally { setSaving(false); }
   }
 
-  return (
-    <div className="memory-workspace">
-      <aside className="memory-browser">
-        <div className="memory-type-tabs"><a href="/memory/personal" className={!isResearch ? "is-active" : ""}>개인 메모리 <span>{memories.filter((memory) => memory.type !== "project_context" && !memory.source.startsWith("research")).length}</span></a><a href="/memory/research" className={isResearch ? "is-active" : ""}>연구 메모리 <span>{memories.filter((memory) => memory.type === "project_context" || memory.source.startsWith("research")).length}</span></a></div>
-        <div className="memory-list-toolbar">
-          <div className="flex items-center gap-2 font-semibold">
-            <Database className="h-4 w-4 text-heather-700" />
-            {title}
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setShowArchived((value) => !value)}
-              className={`grid h-9 w-9 place-items-center rounded-lg border ${
-                showArchived ? "border-heather-500 bg-heather-50 text-heather-700" : "border-line bg-white"
-              }`}
-              title="보관된 기억 보기"
-              aria-label="보관된 기억 보기"
-            >
-              <Archive className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={handleCreateMemory}
-              className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white text-heather-700 hover:bg-heather-50"
-              title="기억 추가"
-              aria-label="기억 추가"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        <label className="memory-search"><Search className="h-4 w-4" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`${title} 검색`} /></label>
-        <div className="memory-list heather-scrollbar">
-          {visibleMemories.length ? (
-            visibleMemories.map((memory) => (
-              <button
-                key={memory.id}
-                type="button"
-                onClick={() => setSelectedId(memory.id)}
-                className={`memory-row ${
-                  draft?.id === memory.id
-                    ? "border-heather-500 bg-white"
-                    : "border-line bg-white hover:border-heather-300"
-                } ${memory.archived ? "opacity-60" : ""}`}
-              >
-                  <span className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-semibold">{memory.source || "제목 없음"}</span>
-                  <span className="memory-date">{new Date(memory.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric" })}</span>
-                </span>
-                <span className="mt-2 line-clamp-3 text-sm leading-5 text-slate-600">{memory.content}</span>
-              </button>
-            ))
-          ) : (
-            <div className="workspace-empty"><strong>아직 저장된 {title}가 없습니다.</strong><p>{isResearch ? "실험 기록과 연구 메모를 저장해보세요." : "중요한 개인 정보와 결정사항을 저장해보세요."}</p></div>
-          )}
-        </div>
-      </aside>
+  async function remove() {
+    if (!selected || saving) return;
+    setSaving(true); setError("");
+    try {
+      await onDeleteMemory(selected.id);
+      setSelectedId(null); setContent(""); setConfirmDelete(false); setMobileView("list");
+    } catch {
+      setError(copy.deleteFailed);
+    } finally { setSaving(false); }
+  }
 
-      {draft ? (
-        <form
-          className="memory-editor"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleSave();
-          }}
-        >
-          <div className="editor-heading">
-            <div>
-              <p>{isResearch ? "Research memory" : "Personal memory"}</p>
-              <h2>{title} 등록 / 편집</h2>
-            </div>
-            <div className="editor-actions">
-              <button
-                type="button"
-                onClick={handleArchive}
-                className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white text-slate-600 hover:bg-slate-50"
-                title={draft.archived ? "보관 해제" : "보관"}
-                aria-label={draft.archived ? "보관 해제" : "보관"}
-              >
-                <Archive className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white text-coral hover:bg-red-50"
-                title="삭제"
-                aria-label="삭제"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-              <button
-                type="submit"
-                className="grid h-10 w-10 place-items-center rounded-lg border border-heather-700 bg-heather-700 text-white hover:bg-heather-900"
-                title="저장"
-                aria-label="저장"
-              >
-                <Save className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="memory-editor-grid">
-            <label className="workspace-field">
-              <span>타입</span>
-              <select
-                value={draft.type}
-                onChange={(event) => setDraft({ ...draft, type: event.target.value as MemoryType })}
-                className="mt-1 h-11 w-full rounded-lg border border-line px-3"
-              >
-                {MEMORY_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="workspace-field">
-              <span>{isResearch ? "연구 또는 프로젝트명" : "제목"}</span>
-              <input
-                value={draft.source}
-                onChange={(event) => setDraft({ ...draft, source: event.target.value })}
-                className="mt-1 h-11 w-full rounded-lg border border-line px-3"
-              />
-            </label>
-          </div>
-
-          <label className="workspace-field">
-            <span>내용</span>
-            <textarea
-              value={draft.content}
-              onChange={(event) => setDraft({ ...draft, content: event.target.value })}
-              className="mt-1 min-h-36 w-full resize-y rounded-lg border border-line px-3 py-2 leading-6"
-              placeholder={isResearch ? "연구 기록, 핵심 데이터, 결과와 다음 실험을 적으세요." : "Heather가 장기적으로 참고해야 할 사실, 선호, 규칙을 적으세요."}
-            />
-          </label>
-
-          <label className="workspace-field">
-            <span>태그</span>
-            <input
-              value={draft.tags.join(", ")}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  tags: event.target.value
-                    .split(",")
-                    .map((tag) => tag.trim())
-                    .filter(Boolean)
-                })
-              }
-              className="mt-1 h-11 w-full rounded-lg border border-line px-3"
-              placeholder="project, relationship, preference"
-            />
-          </label>
-
-        </form>
-      ) : (
-        <div className="memory-editor-empty">
-          새 메모리를 추가해 중요한 맥락을 기록하세요.
-        </div>
-      )}
-    </div>
-  );
+  return <div className={`memory-workspace simple-memory-workspace ${mobileView === "editor" ? "is-mobile-editor" : "is-mobile-list"}`}>
+    <aside className="memory-browser simple-memory-list">
+      <header className="simple-memory-list-header"><div><h2>{copy.title}</h2><p>{countLabel(scopedMemories.length, resolvedLocale)}</p></div></header>
+      <form className="simple-memory-search" onSubmit={(event) => { event.preventDefault(); applySearch(); }}><Search /><input value={draftQuery} onChange={(event) => setDraftQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /><button type="submit" className="sr-only">{copy.search}</button></form>
+      <div className="memory-list heather-scrollbar simple-memory-items">
+        {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}><span className="simple-memory-content">{memory.content}</span><time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
+        {renderedMemories.length < filteredMemories.length ? <button type="button" className="simple-memory-more" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)}>{copy.loadMore}</button> : null}
+      </div>
+    </aside>
+    <section className="memory-editor simple-memory-editor">
+      <header className="simple-memory-editor-header"><button type="button" className="simple-memory-back" onClick={() => setMobileView("list")} aria-label={copy.back}><ArrowLeft /></button><div><h2>{selected ? copy.edit : copy.newMemory}</h2><p>{copy.editorHint}</p></div><button type="button" className="simple-memory-new" onClick={startNewMemory} aria-label={copy.newMemory} title={copy.newMemory}>+</button></header>
+      <label className="simple-memory-field"><span>{copy.content}</span><textarea value={content} maxLength={isResearch ? 20000 : 10000} onChange={(event) => setContent(event.target.value)} placeholder={copy.placeholder} /></label>
+      <div className="simple-memory-editor-footer"><small>{content.length.toLocaleString()} / {(isResearch ? 20000 : 10000).toLocaleString()}</small><div>{selected ? <button type="button" className="simple-memory-delete" disabled={saving} onClick={() => setConfirmDelete(true)}><Trash2 />{copy.delete}</button> : null}<button type="button" className="simple-memory-save" disabled={!content.trim() || saving} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : null}{saving ? copy.saving : copy.save}</button></div></div>
+      {error ? <p className="simple-memory-error" role="alert">{error}</p> : null}
+    </section>
+    {confirmDelete && selected ? <DeleteDialog copy={copy} onCancel={() => setConfirmDelete(false)} onDelete={() => void remove()} loading={saving} /> : null}
+  </div>;
 }
+
+function MemoryEmpty({ query, copy }: { query: boolean; copy: Copy }) { return <div className="simple-memory-empty"><strong>{query ? copy.noResults : copy.emptyTitle}</strong><p>{query ? "" : copy.emptyDescription}</p></div>; }
+
+function DeleteDialog({ copy, onCancel, onDelete, loading }: { copy: Copy; onCancel: () => void; onDelete: () => void; loading: boolean }) { return <div className="simple-memory-modal-backdrop" role="presentation"><section className="simple-memory-modal" role="dialog" aria-modal="true" aria-labelledby="memory-delete-title"><button type="button" className="simple-memory-modal-close" onClick={onCancel} aria-label={copy.cancel}><X /></button><h2 id="memory-delete-title">{copy.deleteTitle}</h2><p>{copy.deleteDescription}</p><footer><button type="button" className="simple-memory-delete" onClick={onCancel}>{copy.cancel}</button><button type="button" className="simple-memory-save is-danger" onClick={onDelete} disabled={loading}>{loading ? <Loader2 className="animate-spin" /> : null}{copy.delete}</button></footer></section></div>; }
+
+function inScope(memory: MemoryRecord, variant: "personal" | "research") { return variant === "research" ? memory.type === "project_context" || memory.source.startsWith("research") : memory.type !== "project_context" && !memory.source.startsWith("research"); }
+function searchableMemory(memory: MemoryRecord) { return `${memory.content} ${memory.source} ${memory.tags.join(" ")} ${memory.type}`.toLocaleLowerCase(); }
+function formatDate(value: string, locale: HeatherLanguage) { return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "ko-KR", { year: "numeric", month: "numeric", day: "numeric" }).format(new Date(value)); }
+function countLabel(count: number, locale: HeatherLanguage) { return locale === "en" ? `${count} ${count === 1 ? "memory" : "memories"}` : `${count}개`; }
+
+function buildMemoryMetadata(content: string, variant: "personal" | "research"): Pick<MemoryRecord, "type" | "source" | "tags"> {
+  const words = content.match(/[A-Za-z0-9가-힣]{2,}/g) || [];
+  const tags = [...new Set(words.filter((word) => word.length >= 2).slice(0, 5))];
+  if (variant === "research") return { type: "project_context", source: "research", tags };
+  const type = /선호|좋아|싫어|말투|스타일/i.test(content) ? "writing_preference" : /결정|원칙|규칙/i.test(content) ? "decision_rule" : /반복|매주|매일|일정/i.test(content) ? "recurring_task" : "important_fact";
+  return { type, source: "personal", tags };
+}
+
+const KO = { title: "개인 메모리", search: "개인 메모리 검색", content: "내용", placeholder: "Heather가 기억할 내용을 입력하세요.", save: "저장", saving: "저장 중...", delete: "삭제", cancel: "취소", edit: "개인 메모리", newMemory: "새 개인 메모리", editorHint: "자연어로 기억할 내용을 작성하세요.", emptyTitle: "아직 등록된 개인 메모리가 없습니다.", emptyDescription: "오른쪽 입력창에서 기억할 내용을 등록하세요.", noResults: "검색 결과가 없습니다.", loadMore: "더 보기", saveFailed: "저장하지 못했습니다. 내용을 유지한 채 다시 시도할 수 있습니다.", deleteFailed: "삭제하지 못했습니다. 다시 시도해주세요.", deleteTitle: "개인 메모리를 삭제할까요?", deleteDescription: "삭제한 메모리는 복구할 수 없습니다.", back: "메모리 목록으로" };
+const EN = { title: "Personal Memories", search: "Search personal memories", content: "Content", placeholder: "Enter something Heather should remember.", save: "Save", saving: "Saving...", delete: "Delete", cancel: "Cancel", edit: "Personal memory", newMemory: "New personal memory", editorHint: "Write naturally what Heather should remember.", emptyTitle: "No personal memories yet.", emptyDescription: "Add something to remember using the editor.", noResults: "No memories found.", loadMore: "Load more", saveFailed: "Could not save this memory. Your text is still here to retry.", deleteFailed: "Could not delete this memory. Please try again.", deleteTitle: "Delete this personal memory?", deleteDescription: "This action cannot be undone.", back: "Back to memories" };
+const KO_RESEARCH = { ...KO, title: "연구 메모리", search: "연구 메모리 검색", placeholder: "Heather가 기억할 연구 내용을 입력하세요.", edit: "연구 메모리", newMemory: "새 연구 메모리", editorHint: "연구 내용, 측정값, 결과를 자연어로 작성하세요.", emptyTitle: "아직 등록된 연구 메모리가 없습니다.", emptyDescription: "오른쪽 입력창에서 기억할 연구 내용을 등록하세요.", noResults: "검색 결과가 없습니다.", deleteTitle: "연구 메모리를 삭제할까요?", back: "연구 메모리 목록으로" };
+const EN_RESEARCH = { ...EN, title: "Research Memories", search: "Search research memories", placeholder: "Enter research information Heather should remember.", edit: "Research memory", newMemory: "New research memory", editorHint: "Write research notes, measurements, and results naturally.", emptyTitle: "No research memories yet.", emptyDescription: "Add research information using the editor.", noResults: "No research memories found.", deleteTitle: "Delete this research memory?", back: "Back to research memories" };
+type Copy = typeof KO;
