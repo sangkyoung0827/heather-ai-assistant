@@ -8,6 +8,7 @@ import { generateForModelRole } from "../../../../lib/llm/service";
 import { buildResearchContext } from "../../../../lib/research/context";
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
 import { runMatchedSkill } from "../../../../lib/skills/agent-runtime";
+import { DirectCommandRepository } from "../../../../lib/intent/direct-command-repository";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,15 @@ export async function POST(request: Request) {
       const previous = await conversations.findCompletedAssistant(turn.conversation.id, clientMessageId);
       if (previous) return NextResponse.json({ message: previous.content, title: turn.conversation.title, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: previous.id, duplicate: true });
       return NextResponse.json({ error: "이 메시지는 이미 처리 중입니다. 잠시 후 대화를 다시 열어주세요.", conversationId: turn.conversation.id }, { status: 409 });
+    }
+
+    const directCommands = new DirectCommandRepository();
+    const directMatch = await directCommands.find(payload.message);
+    if (directMatch) {
+      await directCommands.incrementUsage(directMatch.command.id);
+      await directCommands.logIntent("direct_command", payload.message, directMatch.command.id);
+      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: directMatch.command.response, source: "direct_command", replyTo: clientMessageId, metadata: { provider: "direct-command" } });
+      return NextResponse.json({ message: directMatch.command.response, title: directMatch.command.canonicalTrigger, risk: { level: "low", requiresConfirmation: false, reason: "Saved direct command." }, mode: "research", provider: "direct-command", model: "server", conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: assistant.id });
     }
 
     const skill = await runMatchedSkill(payload.message, payload.settings.defaultLanguage, request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null, "research");
