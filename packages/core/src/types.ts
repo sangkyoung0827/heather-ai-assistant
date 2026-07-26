@@ -97,6 +97,7 @@ export interface ConversationMessage {
   role: ConversationRole;
   content: string;
   createdAt: string;
+  status?: "pending" | "completed" | "failed";
   source?: "text" | "voice";
   provider?: string;
   model?: string;
@@ -109,6 +110,8 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
+  conversationType?: "general" | "research";
+  lastMessageAt?: string;
 }
 
 export interface ProjectRecord {
@@ -330,6 +333,8 @@ export interface SafetyRisk {
 export interface ChatRequestPayload {
   message: string;
   messageId?: string;
+  conversationId?: string;
+  clientMessageId?: string;
   conversation?: Conversation;
   settings: HeatherSettings;
   memories: MemoryRecord[];

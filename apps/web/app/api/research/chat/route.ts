@@ -6,14 +6,26 @@ import { LlmProviderError } from "../../../../lib/llm/errors";
 import { isValidChatPayload } from "../../../../lib/llm/messages";
 import { generateForModelRole } from "../../../../lib/llm/service";
 import { buildResearchContext } from "../../../../lib/research/context";
+import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  let turn: Awaited<ReturnType<ConversationRepository["beginMessage"]>> | null = null;
+  let payload: ChatRequestPayload | null = null;
   try {
-    const payload = await request.json() as ChatRequestPayload;
+    payload = await request.json() as ChatRequestPayload;
     const validationError = isValidChatPayload(payload);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+    const clientMessageId = payload.clientMessageId || payload.messageId;
+    if (!clientMessageId) return NextResponse.json({ error: "clientMessageId is required." }, { status: 400 });
+    const conversations = new ConversationRepository();
+    turn = await conversations.beginMessage({ conversationId: payload.conversationId, type: "research", title: createConversationTitle(payload.message, "research"), content: payload.message, clientMessageId });
+    if (turn.duplicate) {
+      const previous = await conversations.findCompletedAssistant(turn.conversation.id, clientMessageId);
+      if (previous) return NextResponse.json({ message: previous.content, title: turn.conversation.title, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: previous.id, duplicate: true });
+      return NextResponse.json({ error: "이 메시지는 이미 처리 중입니다. 잠시 후 대화를 다시 열어주세요.", conversationId: turn.conversation.id }, { status: 409 });
+    }
 
     const profile = resolveModelProfile("research");
     const { evidence, messages } = buildResearchContext(payload);
@@ -23,12 +35,16 @@ export async function POST(request: Request) {
       maxTokens: profile.maxTokens
     });
 
+    const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: response.content, source: "nemotron", replyTo: clientMessageId, metadata: { provider: response.provider, model: response.model } });
     return NextResponse.json({
       message: response.content,
       title: generateConversationTitle(payload.message),
       risk: { level: "low", requiresConfirmation: false, reason: "연구 분석 텍스트 응답입니다." },
       mode: "research",
-      evidence
+      evidence,
+      conversationId: turn.conversation.id,
+      userMessageId: turn.userMessage.id,
+      assistantMessageId: assistant.id
     });
   } catch (error) {
     const message = error instanceof LlmProviderError && error.code === "configuration"
@@ -36,6 +52,7 @@ export async function POST(request: Request) {
       : error instanceof LlmProviderError && error.code === "timeout"
         ? "연구 AI 응답 시간이 초과되었습니다. 잠시 후 다시 시도하세요."
         : "연구 AI 응답을 준비하지 못했습니다. 잠시 후 다시 시도하세요.";
-    return NextResponse.json({ error: message }, { status: error instanceof LlmProviderError && error.code === "configuration" ? 503 : 502 });
+    if (turn && payload) await new ConversationRepository().appendAssistant({ conversationId: turn.conversation.id, content: message, source: "nemotron", status: "failed", replyTo: payload.clientMessageId || payload.messageId || "unknown" }).catch(() => undefined);
+    return NextResponse.json({ error: message, conversationId: turn?.conversation.id }, { status: error instanceof LlmProviderError && error.code === "configuration" ? 503 : 502 });
   }
 }

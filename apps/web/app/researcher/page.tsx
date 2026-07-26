@@ -1,2 +1,5 @@
-import { HeatherWorkspace } from "../../components/heather/HeatherWorkspace";
-export default function ResearcherPage() { return <HeatherWorkspace />; }
+import { redirect } from "next/navigation";
+
+export default function ResearcherPage() {
+  redirect("/researcher/chat");
+}

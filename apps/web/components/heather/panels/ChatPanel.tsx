@@ -33,16 +33,14 @@ import type {
 import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
 import type { DesktopActionResult, MediaActionResult } from "@heather/platform";
 import { HeatherAvatar } from "../HeatherAvatar";
+import { useConversationStore } from "../../../lib/conversations/use-conversation-store";
 
 interface ChatPanelProps {
-  conversations: Conversation[];
   memories: MemoryRecord[];
   projects: ProjectRecord[];
   teachings: TeachingRecord[];
   automationRecipes: AutomationRecipe[];
   settings: HeatherSettings;
-  onSaveConversation: (conversation: Conversation) => Promise<void>;
-  onDeleteConversation: (id: string) => Promise<void>;
   onSaveMemory: (memory: MemoryRecord) => Promise<void>;
   onSaveSettings: (settings: HeatherSettings) => Promise<void>;
 }
@@ -54,6 +52,7 @@ interface ApiChatResponse extends ChatResponsePayload {
   cached?: boolean;
   meteredApiCall?: boolean;
   error?: string;
+  conversationId?: string;
 }
 
 type FastDesktopActionName =
@@ -112,18 +111,15 @@ let activeHeatherAudio: HTMLAudioElement | null = null;
 let activeHeatherAudioUrl: string | null = null;
 
 export function ChatPanel({
-  conversations,
   memories,
   projects,
   teachings,
   automationRecipes,
   settings,
-  onSaveConversation,
-  onDeleteConversation,
   onSaveMemory,
   onSaveSettings
 }: ChatPanelProps) {
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const { conversations, activeConversation, loading: conversationsLoading, activeConversationId, selectConversation, setNewConversation, searchConversations, refreshAfterSend, archiveConversation, applyOptimistic, loadMore, loadOlderMessages } = useConversationStore("general");
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -136,28 +132,20 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const sendLockRef = useRef(false);
 
-  const activeConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === activeConversationId) || null,
-    [activeConversationId, conversations]
-  );
-
   const filteredConversations = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return conversations;
 
     return conversations.filter((conversation) => {
-      const haystack = `${conversation.title} ${conversation.messages
-        .map((message) => message.content)
-        .join(" ")}`.toLowerCase();
+      const haystack = `${conversation.title} ${conversation.preview}`.toLowerCase();
       return haystack.includes(query);
     });
   }, [conversations, search]);
 
   useEffect(() => {
-    if (!activeConversationId && conversations[0]) {
-      setActiveConversationId(conversations[0].id);
-    }
-  }, [activeConversationId, conversations]);
+    const timer = window.setTimeout(() => { void searchConversations(search); }, 180);
+    return () => window.clearTimeout(timer);
+  }, [search, searchConversations]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -170,18 +158,16 @@ export function ChatPanel({
   }, []);
 
   async function handleNewConversation() {
-    const conversation = createConversation();
-    await onSaveConversation(conversation);
-    setActiveConversationId(conversation.id);
+    await setNewConversation();
     setDraft("");
   }
 
   async function handleDeleteConversation(id: string) {
     if (!window.confirm("이 대화를 삭제할까요?")) return;
 
-    await onDeleteConversation(id);
+    await archiveConversation(id);
     if (activeConversationId === id) {
-      setActiveConversationId(null);
+      await setNewConversation();
     }
   }
 
@@ -203,13 +189,14 @@ export function ChatPanel({
       updatedAt: nowIso()
     };
 
-    setActiveConversationId(optimisticConversation.id);
-    await onSaveConversation(optimisticConversation);
+    applyOptimistic(userMessage);
 
     try {
       const payload: ChatRequestPayload = {
         message,
         messageId: userMessage.id,
+        clientMessageId: userMessage.id,
+        conversationId: activeConversation?.id?.startsWith("pending-") ? undefined : activeConversation?.id,
         conversation: optimisticConversation,
         settings,
         memories,
@@ -222,22 +209,17 @@ export function ChatPanel({
         setProviderStatus("Heather 응답 대기 중");
       }
       const data = fastResponse || (await resolveHeatherResponse(payload));
+      if (fastResponse) {
+        const persisted = await persistLocalResponse({ message, clientMessageId: userMessage.id, conversationId: payload.conversationId, response: data });
+        data.conversationId = persisted.conversationId;
+      }
 
       const assistantMessage = createMessage("assistant", data.message, "text", {
         provider: data.provider,
         model: data.model
       });
-      const finalConversation: Conversation = {
-        ...optimisticConversation,
-        title:
-          optimisticConversation.messages.length <= 1
-            ? data.title || optimisticConversation.title
-            : optimisticConversation.title,
-        messages: [...optimisticConversation.messages, assistantMessage],
-        updatedAt: nowIso()
-      };
-
-      await onSaveConversation(finalConversation);
+      applyOptimistic(assistantMessage);
+      if (data.conversationId) await refreshAfterSend(data.conversationId);
       setProviderStatus(formatProviderStatus(data));
 
       if (data.meteredApiCall) {
@@ -275,11 +257,7 @@ export function ChatPanel({
         "assistant",
         `지금 응답을 완성하지 못했어요. ${error instanceof Error ? error.message : "알 수 없는 오류"}`
       );
-      await onSaveConversation({
-        ...optimisticConversation,
-        messages: [...optimisticConversation.messages, assistantMessage],
-        updatedAt: nowIso()
-      });
+      applyOptimistic(assistantMessage);
       setProviderStatus("오류 발생");
     } finally {
       sendLockRef.current = false;
@@ -469,7 +447,7 @@ export function ChatPanel({
               <button
                 key={conversation.id}
                 type="button"
-                onClick={() => setActiveConversationId(conversation.id)}
+                onClick={() => void selectConversation(conversation.id)}
                 className={`chat-conversation-row group ${
                   activeConversationId === conversation.id
                     ? "border-heather-500 bg-white"
@@ -478,7 +456,7 @@ export function ChatPanel({
               >
                 <span className="block truncate text-sm font-semibold">{conversation.title}</span>
                 <span className="mt-1 block truncate text-xs text-slate-500">
-                  {conversation.messages.at(-1)?.content || "아직 메시지가 없습니다."}
+                  {conversation.preview || "아직 메시지가 없습니다."}
                 </span>
                 <span className="mt-2 flex items-center justify-between text-xs text-slate-400">
                   <span>{new Date(conversation.updatedAt).toLocaleString("ko-KR")}</span>
@@ -505,8 +483,9 @@ export function ChatPanel({
               </button>
             ))
           ) : (
-            <p className="chat-list-empty">검색 결과가 없습니다.</p>
+            <p className="chat-list-empty">{conversationsLoading ? "대화를 불러오는 중입니다." : "검색 결과가 없습니다."}</p>
           )}
+          {filteredConversations.length === conversations.length ? <button type="button" className="chat-load-more" onClick={() => void loadMore()}>더 보기</button> : null}
         </div>
       </aside>
 
@@ -520,6 +499,7 @@ export function ChatPanel({
         </div>
 
         <div className="chat-message-area heather-scrollbar">
+          {activeConversation?.messages.length ? <button type="button" className="chat-load-more" onClick={() => void loadOlderMessages()}>이전 메시지 불러오기</button> : null}
           {activeConversation?.messages.length ? (
             activeConversation.messages.map((message) => (
               <article
@@ -634,6 +614,17 @@ export function ChatPanel({
       </section>
     </div>
   );
+}
+
+async function persistLocalResponse(input: { message: string; clientMessageId: string; conversationId?: string; response: ApiChatResponse }) {
+  const response = await fetch("/api/conversations/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const data = await response.json() as { conversationId?: string; error?: string };
+  if (!response.ok || !data.conversationId) throw new Error(data.error || "Conversation could not be saved.");
+  return { conversationId: data.conversationId };
 }
 
 function formatProviderStatus(data: ApiChatResponse): string {

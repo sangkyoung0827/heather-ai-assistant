@@ -1,0 +1,203 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Conversation, ConversationMessage } from "@heather/core";
+import type { ConversationListItem, ConversationType, StoredMessageStatus } from "./types";
+
+const MAX_MESSAGE_LENGTH = 12_000;
+const MAX_TITLE_LENGTH = 120;
+const MAX_METADATA_BYTES = 4_000;
+
+type ConversationRow = Record<string, unknown>;
+type MessageRow = Record<string, unknown>;
+
+export class ConversationRepository {
+  private readonly client: SupabaseClient;
+
+  constructor() {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) throw new Error("Heather conversation storage is not configured.");
+    this.client = createClient(url, key, { auth: { persistSession: false } });
+  }
+
+  async list(type: ConversationType, options: { limit?: number; cursor?: string; search?: string } = {}) {
+    const limit = clampLimit(options.limit, 25, 50);
+    let query = this.client
+      .from("conversations")
+      .select("id, conversation_type, title, summary, archived, created_at, updated_at, last_message_at, metadata")
+      .eq("conversation_type", type)
+      .eq("archived", false)
+      .order("last_message_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit + 1);
+    if (options.search?.trim()) query = query.ilike("title", `%${escapeLike(options.search.trim())}%`);
+    if (options.cursor) query = query.lt("last_message_at", options.cursor);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data || []) as ConversationRow[];
+    const page = rows.slice(0, limit);
+    const ids = page.map((row) => String(row.id));
+    const previews = await this.getPreviews(ids);
+    return {
+      conversations: page.map((row) => toConversationListItem(row, previews.get(String(row.id)) || "")),
+      nextCursor: rows.length > limit ? String(page.at(-1)?.last_message_at || "") : null
+    };
+  }
+
+  async get(id: string, type: ConversationType): Promise<ConversationListItem | null> {
+    const { data, error } = await this.client
+      .from("conversations")
+      .select("id, conversation_type, title, summary, archived, created_at, updated_at, last_message_at, metadata")
+      .eq("id", id)
+      .eq("conversation_type", type)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? toConversationListItem(data as ConversationRow, (await this.getPreviews([id])).get(id) || "") : null;
+  }
+
+  async listMessages(id: string, type: ConversationType, options: { limit?: number; before?: string } = {}) {
+    await this.requireConversation(id, type);
+    const limit = clampLimit(options.limit, 40, 60);
+    let query = this.client
+      .from("conversation_messages")
+      .select("id, conversation_id, role, content, source, status, client_message_id, metadata, created_at")
+      .eq("conversation_id", id)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit + 1);
+    if (options.before) query = query.lt("created_at", options.before);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data || []) as MessageRow[];
+    const page = rows.slice(0, limit).reverse().map(toConversationMessage);
+    return { messages: page, nextCursor: rows.length > limit ? String(rows[limit - 1]?.created_at || "") : null };
+  }
+
+  async beginMessage(input: { conversationId?: string; type: ConversationType; title: string; content: string; clientMessageId: string }) {
+    const content = validateContent(input.content);
+    const clientMessageId = validateClientMessageId(input.clientMessageId);
+    const conversation = input.conversationId
+      ? await this.requireConversation(input.conversationId, input.type)
+      : await this.create(input.type, input.title);
+    const { data: existing, error: existingError } = await this.client
+      .from("conversation_messages")
+      .select("id, conversation_id, role, content, source, status, client_message_id, metadata, created_at")
+      .eq("conversation_id", String(conversation.id))
+      .eq("client_message_id", clientMessageId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (existing) return { conversation: toConversationListItem(conversation, ""), userMessage: toConversationMessage(existing as MessageRow), duplicate: true };
+    const { data, error } = await this.client
+      .from("conversation_messages")
+      .insert({ conversation_id: String(conversation.id), role: "user", content, status: "completed", client_message_id: clientMessageId, metadata: {} })
+      .select("id, conversation_id, role, content, source, status, client_message_id, metadata, created_at")
+      .single();
+    if (error) throw error;
+    const now = new Date().toISOString();
+    const { error: updateError } = await this.client
+      .from("conversations")
+      .update({ last_message_at: now })
+      .eq("id", String(conversation.id));
+    if (updateError) throw updateError;
+    return { conversation: toConversationListItem({ ...conversation, last_message_at: now }, content), userMessage: toConversationMessage(data as MessageRow), duplicate: false };
+  }
+
+  async findCompletedAssistant(conversationId: string, clientMessageId: string) {
+    const { data, error } = await this.client
+      .from("conversation_messages")
+      .select("id, conversation_id, role, content, source, status, client_message_id, metadata, created_at")
+      .eq("conversation_id", conversationId)
+      .eq("role", "assistant")
+      .contains("metadata", { reply_to: clientMessageId })
+      .eq("status", "completed")
+      .maybeSingle();
+    if (error) throw error;
+    return data ? toConversationMessage(data as MessageRow) : null;
+  }
+
+  async appendAssistant(input: { conversationId: string; content: string; source: string; status?: StoredMessageStatus; replyTo: string; metadata?: Record<string, unknown> }) {
+    const metadata = { ...(input.metadata || {}), reply_to: input.replyTo };
+    if (JSON.stringify(metadata).length > MAX_METADATA_BYTES) throw new Error("Message metadata is too large.");
+    const { data, error } = await this.client
+      .from("conversation_messages")
+      .insert({ conversation_id: input.conversationId, role: "assistant", content: validateContent(input.content), source: input.source.slice(0, 80), status: input.status || "completed", metadata })
+      .select("id, conversation_id, role, content, source, status, client_message_id, metadata, created_at")
+      .single();
+    if (error) throw error;
+    const now = new Date().toISOString();
+    const { error: updateError } = await this.client.from("conversations").update({ last_message_at: now }).eq("id", input.conversationId);
+    if (updateError) throw updateError;
+    return toConversationMessage(data as MessageRow);
+  }
+
+  async update(id: string, type: ConversationType, input: { title?: string; archived?: boolean }) {
+    await this.requireConversation(id, type);
+    const update: Record<string, unknown> = {};
+    if (typeof input.title === "string") update.title = validateTitle(input.title, type);
+    if (typeof input.archived === "boolean") update.archived = input.archived;
+    const { data, error } = await this.client.from("conversations").update(update).eq("id", id).select("id, conversation_type, title, summary, archived, created_at, updated_at, last_message_at, metadata").single();
+    if (error) throw error;
+    return toConversationListItem(data as ConversationRow, "");
+  }
+
+  private async create(type: ConversationType, title: string) {
+    const { data, error } = await this.client
+      .from("conversations")
+      .insert({ conversation_type: type, title: validateTitle(title, type), metadata: {} })
+      .select("id, conversation_type, title, summary, archived, created_at, updated_at, last_message_at, metadata")
+      .single();
+    if (error) throw error;
+    return data as ConversationRow;
+  }
+
+  private async requireConversation(id: string, type: ConversationType) {
+    if (!isUuid(id)) throw new Error("Conversation was not found.");
+    const { data, error } = await this.client
+      .from("conversations")
+      .select("id, conversation_type, title, summary, archived, created_at, updated_at, last_message_at, metadata")
+      .eq("id", id)
+      .eq("conversation_type", type)
+      .eq("archived", false)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("Conversation was not found.");
+    return data as ConversationRow;
+  }
+
+  private async getPreviews(ids: string[]) {
+    const previews = new Map<string, string>();
+    if (!ids.length) return previews;
+    const { data, error } = await this.client
+      .from("conversation_messages")
+      .select("conversation_id, content, created_at")
+      .in("conversation_id", ids)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    for (const row of (data || []) as MessageRow[]) {
+      const id = String(row.conversation_id);
+      if (!previews.has(id)) previews.set(id, String(row.content || ""));
+    }
+    return previews;
+  }
+}
+
+export function createConversationTitle(message: string, type: ConversationType) {
+  const compact = message.replace(/[`*_#>[\]]/g, "").replace(/\s+/g, " ").trim();
+  if (!compact) return type === "research" ? "새 연구 대화" : "새 대화";
+  return compact.length > 48 ? `${compact.slice(0, 47)}…` : compact;
+}
+
+function toConversationListItem(row: ConversationRow, preview: string): ConversationListItem {
+  return { id: String(row.id), title: String(row.title), messages: [], createdAt: String(row.created_at), updatedAt: String(row.updated_at), archived: Boolean(row.archived), conversationType: row.conversation_type === "research" ? "research" : "general", lastMessageAt: String(row.last_message_at), preview };
+}
+
+function toConversationMessage(row: MessageRow): ConversationMessage {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {};
+  return { id: String(row.id), role: row.role as ConversationMessage["role"], content: String(row.content), createdAt: String(row.created_at), status: row.status as StoredMessageStatus, source: row.source === "voice" ? "voice" : "text", provider: typeof metadata.provider === "string" ? metadata.provider : undefined, model: typeof metadata.model === "string" ? metadata.model : undefined };
+}
+
+function validateTitle(value: string, type: ConversationType) { const title = value.trim() || (type === "research" ? "새 연구 대화" : "새 대화"); if (title.length > MAX_TITLE_LENGTH) return title.slice(0, MAX_TITLE_LENGTH); return title; }
+function validateContent(value: string) { const content = value.trim(); if (!content || content.length > MAX_MESSAGE_LENGTH) throw new Error("Message must be between 1 and 12,000 characters."); return content; }
+function validateClientMessageId(value: string) { const id = value.trim(); if (!id || id.length > 160) throw new Error("Invalid client message ID."); return id; }
+function clampLimit(value: number | undefined, fallback: number, max: number) { const number = Number(value); return Number.isFinite(number) ? Math.min(Math.max(Math.floor(number), 1), max) : fallback; }
+function isUuid(value: string) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
+function escapeLike(value: string) { return value.replace(/[%_]/g, "\\$&"); }
