@@ -90,7 +90,29 @@ function parseBlock(body: string): DirectCommandInput {
   const tags = list(fields.get("TAGS"), "TAGS", BULK_IMPORT_LIMITS.tags, BULK_IMPORT_LIMITS.title);
   const enabledRaw = (fields.get("ENABLED") || []).join("\n").trim();
   if (enabledRaw && enabledRaw !== "true" && enabledRaw !== "false") throw new Error("ENABLED는 true 또는 false여야 합니다.");
-  return { title, canonicalTrigger, triggers: unique(canonicalTrigger, triggers), response, tags: uniqueTags(tags), enabled: enabledRaw !== "false" };
+  return validateBulkInput({ title, canonicalTrigger, triggers, response, tags, enabled: enabledRaw !== "false" });
+}
+export function validateBulkInput(input: DirectCommandInput): DirectCommandInput {
+  const title = input.title?.trim();
+  const canonicalTrigger = input.canonicalTrigger?.trim();
+  const response = input.response?.trim();
+  if (!title || !canonicalTrigger || !response) throw new Error("제목, 대표 트리거, 응답은 모두 필요합니다.");
+  if (title.length > BULK_IMPORT_LIMITS.title) throw new Error("제목이 너무 깁니다.");
+  if (canonicalTrigger.length > BULK_IMPORT_LIMITS.trigger) throw new Error("대표 트리거가 너무 깁니다.");
+  if (response.length > BULK_IMPORT_LIMITS.response) throw new Error("응답이 너무 깁니다.");
+  const triggers = unique(canonicalTrigger, (input.triggers || []).map((value) => value.trim()).filter(Boolean));
+  if (triggers.length > BULK_IMPORT_LIMITS.triggers) throw new Error(`추가 트리거는 최대 ${BULK_IMPORT_LIMITS.triggers}개까지 가능합니다.`);
+  const tags = uniqueTags((input.tags || []).map((value) => value.trim()).filter(Boolean));
+  if (tags.length > BULK_IMPORT_LIMITS.tags) throw new Error(`태그는 최대 ${BULK_IMPORT_LIMITS.tags}개까지 가능합니다.`);
+  return { title, canonicalTrigger, triggers, response, tags, enabled: input.enabled !== false };
+}
+
+export function isSafeBulkDirectCommand(input: DirectCommandInput): string | null {
+  const text = `${input.title}\n${input.canonicalTrigger}\n${(input.triggers || []).join("\n")}\n${input.response}`.normalize("NFKC").toLocaleLowerCase();
+  if (/(현재\s*(시간|날짜|날씨|주가|환율|뉴스|일정|시스템)|오늘\s*(시간|날짜|날씨|일정)|today'?s?\s*(weather|date|schedule)|current\s*(time|weather|price|status)|latest\s*news)/i.test(text)) return "실시간 또는 동적 정보는 고정 직접명령으로 등록할 수 없습니다.";
+  if (/(삭제|덮어쓰기|이동|결제|구매|주문|송금|이메일.*발송|비밀번호|토큰|쿠키|delete|overwrite|payment|purchase|password|token|cookie|send\s*email)/i.test(text)) return "위험하거나 민감한 작업은 직접명령으로 등록할 수 없습니다.";
+  if (/(의료|법률|투자\s*판단|medical\s*advice|legal\s*advice|investment\s*advice)/i.test(text)) return "의료, 법률, 투자 판단은 고정 직접명령으로 등록할 수 없습니다.";
+  return null;
 }
 function oneLine(lines: string[] | undefined, name: string, limit: number) { const value = (lines || []).join("\n").trim(); if (!value) throw new Error(`${name}이(가) 비어 있습니다.`); if (value.includes("\n")) throw new Error(`${name}은(는) 한 줄이어야 합니다.`); if (value.length > limit) throw new Error(`${name}이(가) 너무 깁니다.`); return value; }
 function list(lines: string[] | undefined, name: string, count: number, length: number) { const values = (lines || []).map((line) => line.trim()).filter(Boolean).map((line) => { if (!line.startsWith("- ")) throw new Error(`${name} 항목은 '- '로 시작해야 합니다.`); const value = line.slice(2).trim(); if (!value || value.length > length) throw new Error(`${name} 항목이 올바르지 않습니다.`); return value; }); if (values.length > count) throw new Error(`${name}은(는) 최대 ${count}개까지 가능합니다.`); return values; }

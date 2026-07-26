@@ -15,8 +15,11 @@
     "@heather/db": "0.1.0",
     "@heather/platform": "0.1.0",
     "@supabase/supabase-js": "^2.48.1",
+    "csv-parse": "^7.0.1",
     "lucide-react": "^0.468.0",
+    "mammoth": "^1.12.0",
     "next": "^14.2.5",
+    "pdf-parse": "^1.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

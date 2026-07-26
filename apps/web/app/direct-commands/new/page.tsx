@@ -1,2 +1,3 @@
-import { HeatherWorkspace } from "../../../components/heather/HeatherWorkspace";
-export default function NewDirectCommandPage() { return <HeatherWorkspace />; }
+import { redirect } from "next/navigation";
+
+export default function NewDirectCommandPage() { redirect("/direct-commands"); }

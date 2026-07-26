@@ -21,9 +21,11 @@ export type DirectCommandInput = {
 };
 
 export type ImportSummary = { created: number; merged: number; skipped: number; failed: number };
+export type DirectCommandPage = { commands: DirectCommand[]; nextCursor: string | null };
 
 export type DirectCommandStore = {
   getAllDirectCommands(search?: string): Promise<DirectCommand[]>;
+  getDirectCommandPage(options?: { q?: string; cursor?: string | null; limit?: number }): Promise<DirectCommandPage>;
   createDirectCommand(input: DirectCommandInput): Promise<DirectCommand>;
   updateDirectCommand(id: string, input: Partial<DirectCommandInput>): Promise<DirectCommand>;
   deleteDirectCommand(id: string): Promise<void>;
@@ -40,6 +42,13 @@ export function createDirectCommandStore(): DirectCommandStore {
     async getAllDirectCommands(search = "") {
       const query = search ? `?search=${encodeURIComponent(search)}` : "";
       return (await request<{ commands: DirectCommand[] }>(`/api/direct-commands${query}`)).commands;
+    },
+    async getDirectCommandPage(options = {}) {
+      const params = new URLSearchParams();
+      if (options.q) params.set("q", options.q);
+      if (options.cursor) params.set("cursor", options.cursor);
+      params.set("limit", String(options.limit || 30));
+      return request<DirectCommandPage>(`/api/direct-commands?${params.toString()}`);
     },
     async createDirectCommand(input) { return (await request<{ command: DirectCommand }>("/api/direct-commands", { method: "POST", body: JSON.stringify(input) })).command; },
     async updateDirectCommand(id, input) { return (await request<{ command: DirectCommand }>(`/api/direct-commands/${id}`, { method: "PATCH", body: JSON.stringify(input) })).command; },

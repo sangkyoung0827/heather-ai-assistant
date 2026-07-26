@@ -27,6 +27,7 @@ export type DirectCommandInput = {
 export type ImportSummary = { created: number; merged: number; skipped: number; failed: number };
 export type BulkCommitSummary = { created: number; merged: number; duplicate: number; error: number };
 export type StorageStatus = { provider: "supabase" | "local" | "unavailable"; connected: boolean; readable: boolean; writable: boolean };
+export type DirectCommandPage = { commands: DirectCommandRecord[]; nextCursor: string | null };
 
 type QueryPattern = { id?: string; normalized: string; examples: string[]; count: number; response: string; status?: string; lastSeenAt?: string };
 type MemoryState = { commands: DirectCommandRecord[]; patterns: Map<string, QueryPattern>; processedMessageIds: Set<string> };
@@ -58,9 +59,16 @@ export class DirectCommandRepository {
 
   async list(search = ""): Promise<DirectCommandRecord[]> {
     const commands = this.client ? await this.listSupabase() : memory.commands;
-    const keyword = normalizeIntentText(search);
-    if (!keyword) return commands;
-    return commands.filter((command) => normalizeIntentText([command.title, command.canonicalTrigger, ...command.triggers, ...command.tags].join(" ")).includes(keyword));
+    return filterCommands(commands, search);
+  }
+
+  async listPage({ search = "", cursor, limit = 30 }: { search?: string; cursor?: string | null; limit?: number } = {}): Promise<DirectCommandPage> {
+    const commands = await this.list(search);
+    const start = decodeCursor(cursor);
+    const size = Math.max(1, Math.min(limit, 100));
+    const page = commands.slice(start, start + size);
+    const next = start + page.length;
+    return { commands: page, nextCursor: next < commands.length ? encodeCursor(next) : null };
   }
 
   async find(message: string) {
@@ -258,6 +266,27 @@ export class DirectCommandRepository {
       createdBy: row.created_by === "auto" ? "auto" : "user", createdAt: String(row.created_at), updatedAt: String(row.updated_at), usageCount: Number(row.usage_count || 0), lastUsedAt: row.last_used_at ? String(row.last_used_at) : null
     }));
   }
+}
+
+function filterCommands(commands: DirectCommandRecord[], search: string) {
+  const keyword = normalizeIntentText(search);
+  if (!keyword) return commands;
+  return commands.filter((command) => normalizeIntentText([
+    command.title,
+    command.canonicalTrigger,
+    ...command.triggers,
+    ...command.tags,
+    command.response
+  ].join(" ")).includes(keyword));
+}
+
+function encodeCursor(offset: number) { return Buffer.from(String(offset), "utf8").toString("base64url"); }
+function decodeCursor(cursor?: string | null) {
+  if (!cursor) return 0;
+  try {
+    const value = Number.parseInt(Buffer.from(cursor, "base64url").toString("utf8"), 10);
+    return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  } catch { return 0; }
 }
 
 function validateInput(input: DirectCommandInput) {
