@@ -6,8 +6,11 @@ import {
   resolveOllamaFallbackModel,
   resolveOllamaModel
 } from "@heather/ai";
-import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
+import { generateConversationTitle, type ChatRequestPayload, type ChatResponsePayload } from "@heather/core";
 import { runAgentSearch, type SearchSource } from "../../../lib/agent-runtime-search";
+import { resolveModelProfile } from "../../../lib/llm/config";
+import { buildLlmMessages } from "../../../lib/llm/messages";
+import { generateForModelRole } from "../../../lib/llm/service";
 
 export const runtime = "nodejs";
 
@@ -77,12 +80,28 @@ export async function POST(request: Request) {
         })
       );
     } catch (error) {
-      return NextResponse.json(
-        {
-          error: error instanceof Error ? error.message : "Ollama chat request failed."
-        },
-        { status: 503 }
-      );
+      try {
+        const profile = resolveModelProfile("general");
+        const fallback = await generateForModelRole("general", {
+          messages: buildLlmMessages(payload, profile.systemPrompt),
+          temperature: profile.temperature,
+          maxTokens: profile.maxTokens
+        });
+        return NextResponse.json(cacheIfNeeded(cacheKey, payload, {
+          message: fallback.content,
+          title: generateConversationTitle(payload.message),
+          risk: { level: "low", requiresConfirmation: false, reason: "텍스트 응답입니다." },
+          provider: fallback.provider,
+          model: fallback.model
+        }));
+      } catch {
+        return NextResponse.json(
+          {
+            error: error instanceof Error ? error.message : "Heather 응답을 준비하지 못했습니다. 잠시 후 다시 시도하세요."
+          },
+          { status: 503 }
+        );
+      }
     }
   } catch (error) {
     return NextResponse.json(
