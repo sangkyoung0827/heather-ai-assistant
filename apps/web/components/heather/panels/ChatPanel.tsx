@@ -8,6 +8,7 @@ import {
   MicOff,
   Search,
   Send,
+  Smile,
   Trash2,
   Volume2
 } from "lucide-react";
@@ -29,6 +30,7 @@ import type {
   TeachingRecord
 } from "@heather/core";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
+import { HeatherAvatar } from "../HeatherAvatar";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -301,11 +303,22 @@ export function ChatPanel({
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-10rem)] gap-4 lg:grid-cols-[320px_1fr]">
-      <aside className="flex min-h-0 flex-col rounded-lg border border-line bg-slate-50">
-        <div className="border-b border-line p-3">
-          <div className="flex items-center gap-2">
-            <label className="relative min-w-0 flex-1">
+    <div className="chat-workspace dm-workspace">
+      <aside className="chat-conversation-panel">
+        <div className="chat-list-toolbar">
+          <div className="dm-list-heading">
+            <strong>채팅</strong>
+            <button
+              type="button"
+              onClick={handleNewConversation}
+              className="dm-icon-button"
+              title="새 대화"
+              aria-label="새 대화"
+            >
+              <MessageSquarePlus />
+            </button>
+          </div>
+          <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={search}
@@ -313,111 +326,108 @@ export function ChatPanel({
                 placeholder="대화 검색"
                 className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm"
               />
-            </label>
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-white text-heather-700 hover:bg-heather-50"
-              title="새 대화"
-              aria-label="새 대화"
-            >
-              <MessageSquarePlus className="h-4 w-4" />
-            </button>
-          </div>
+          </label>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 heather-scrollbar">
+        <div className="chat-conversation-list heather-scrollbar">
           {filteredConversations.length ? (
             filteredConversations.map((conversation) => (
               <button
                 key={conversation.id}
                 type="button"
                 onClick={() => setActiveConversationId(conversation.id)}
-                className={`group w-full rounded-lg border p-3 text-left transition ${
-                  activeConversationId === conversation.id
-                    ? "border-heather-500 bg-white"
-                    : "border-line bg-white hover:border-heather-300"
+                className={`chat-conversation-row dm-conversation-row group ${
+                  activeConversationId === conversation.id ? "is-active" : ""
                 }`}
               >
-                <span className="block truncate text-sm font-semibold">{conversation.title}</span>
-                <span className="mt-1 block truncate text-xs text-slate-500">
-                  {conversation.messages.at(-1)?.content || "아직 메시지가 없습니다."}
+                <HeatherAvatar settings={settings} size="medium" />
+                <span className="dm-conversation-copy">
+                  <span>
+                    <strong>{conversation.title}</strong>
+                    <time>
+                      {new Date(conversation.updatedAt).toLocaleDateString("ko-KR", {
+                        month: "short",
+                        day: "numeric"
+                      })}
+                    </time>
+                  </span>
+                  <small>{conversation.messages.at(-1)?.content || "아직 메시지가 없습니다."}</small>
                 </span>
-                <span className="mt-2 flex items-center justify-between text-xs text-slate-400">
-                  <span>{new Date(conversation.updatedAt).toLocaleString("ko-KR")}</span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => {
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleDeleteConversation(conversation.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
                       event.stopPropagation();
                       void handleDeleteConversation(conversation.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.stopPropagation();
-                        void handleDeleteConversation(conversation.id);
-                      }
-                    }}
-                    className="grid h-7 w-7 place-items-center rounded-md text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
-                    title="대화 삭제"
-                    aria-label="대화 삭제"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </span>
+                    }
+                  }}
+                  className="dm-row-delete"
+                  title="대화 삭제"
+                  aria-label="대화 삭제"
+                >
+                  <Trash2 />
                 </span>
               </button>
             ))
           ) : (
-            <p className="p-4 text-sm text-slate-500">검색 결과가 없습니다.</p>
+            <p className="chat-list-empty">{search ? "검색 결과가 없습니다." : "아직 대화가 없습니다."}</p>
           )}
         </div>
       </aside>
 
-      <section className="flex min-h-[640px] min-w-0 flex-col rounded-lg border border-line bg-white">
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div className="min-w-0">
-            <h3 className="truncate font-semibold">{activeConversation?.title || "새 대화"}</h3>
-            <p className="text-sm text-slate-500">{providerStatus}</p>
+      <section className="chat-main-panel">
+        <div className="chat-main-header">
+          <div className="dm-header-person">
+            <HeatherAvatar settings={settings} size="medium" />
+            <div className="dm-header-title">
+              <strong>Heather</strong>
+              <small>일상과 연구를 함께하는 파트너</small>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Volume2 className="h-4 w-4 text-heather-700" />
-            <span>{settings.voiceOutputEnabled ? "TTS on" : "TTS off"}</span>
+          <div className="dm-header-actions" title={settings.voiceOutputEnabled ? "음성 응답 켜짐" : "음성 응답 꺼짐"}>
+            <Volume2 />
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 heather-scrollbar">
+        <div className="chat-message-area dm-message-area heather-scrollbar">
           {activeConversation?.messages.length ? (
-            activeConversation.messages.map((message) => (
-              <article
-                key={message.id}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[840px] rounded-lg border px-4 py-3 text-sm leading-6 ${
-                    message.role === "user"
-                      ? "border-heather-500 bg-heather-700 text-white"
-                      : "border-line bg-white text-ink"
-                  }`}
+            <div className="dm-thread">
+              {activeConversation.messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`dm-message-row ${message.role === "user" ? "is-user" : "is-heather"}`}
                 >
-                  <MessageContent content={message.content} />
-                  <div className={`mt-2 text-xs ${message.role === "user" ? "text-heather-100" : "text-slate-400"}`}>
-                    {message.source === "voice" ? "voice" : "text"} ·{" "}
-                    {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}
+                  {message.role !== "user" ? (
+                    <span className="dm-message-avatar">
+                      <HeatherAvatar settings={settings} size="small" />
+                    </span>
+                  ) : null}
+                  <div className="dm-message-stack">
+                    <div className="chat-message dm-message-bubble">
+                      <MessageContent content={message.content} />
+                    </div>
+                    <div className="dm-message-meta">
+                      {message.source === "voice" ? "voice · " : ""}
+                      {new Date(message.createdAt).toLocaleTimeString("ko-KR", {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))
+                </article>
+              ))}
+            </div>
           ) : (
-            <div className="flex h-full min-h-[360px] items-center justify-center text-center">
-              <div>
-                <p className="font-semibold">헤더라고 부르면 시작할게요.</p>
-                <p className="mt-2 text-sm text-slate-500">
-                  프로젝트, 일정, 인간관계 분석, 문서 초안, 오늘의 우선순위를 물어보세요.
-                </p>
-              </div>
+            <div className="chat-welcome">
+              <HeatherAvatar settings={settings} size="large" />
+              <h2>Heather</h2>
+              <p>일상과 연구를 함께하는 파트너</p>
+              <p className="dm-welcome-message">안녕하세요. 오늘은 무엇을 함께 이야기해볼까요?</p>
             </div>
           )}
           {isSending && (
@@ -429,16 +439,24 @@ export function ChatPanel({
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-line p-3">
-          <div className="flex gap-2">
+        <div className="chat-composer-wrap">
+          <div className="chat-composer dm-composer">
+            <button
+              type="button"
+              className="dm-composer-button"
+              onClick={() => {
+                setDraft((current) => `${current}${current ? " " : ""}🙂`);
+                textareaRef.current?.focus();
+              }}
+              title="이모지"
+              aria-label="이모지"
+            >
+              <Smile />
+            </button>
             <button
               type="button"
               onClick={toggleListening}
-              className={`grid h-12 w-12 shrink-0 place-items-center rounded-lg border ${
-                isListening
-                  ? "border-coral bg-red-50 text-coral"
-                  : "border-line bg-white text-heather-700 hover:bg-heather-50"
-              }`}
+              className={`dm-composer-button ${isListening ? "is-listening" : ""}`}
               title={isListening ? "음성 입력 중지" : "음성 입력"}
               aria-label={isListening ? "음성 입력 중지" : "음성 입력"}
             >
@@ -466,20 +484,21 @@ export function ChatPanel({
                 void handleSend();
               }}
               placeholder="헤더에게 요청할 내용을 입력하세요."
-              className="min-h-12 flex-1 resize-none rounded-lg border border-line bg-white px-3 py-3 text-sm leading-5"
+              className="dm-composer-textarea"
               rows={1}
             />
             <button
               type="button"
               onClick={() => void handleSend()}
               disabled={!draft.trim() || isSending}
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-lg border border-heather-700 bg-heather-700 text-white transition hover:bg-heather-900 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-300"
+              className={`dm-send-button ${draft.trim() ? "has-content" : ""}`}
               title="보내기"
               aria-label="보내기"
             >
               {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </div>
+          <p className="dm-composer-status" role="status">{providerStatus}</p>
         </div>
       </section>
     </div>
