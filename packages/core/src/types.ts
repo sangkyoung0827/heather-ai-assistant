@@ -262,6 +262,8 @@ export interface ActionResult {
   result?: unknown;
   error?: string;
   summaryForUser: string;
+  accountProfileId?: AccountProfileId;
+  service?: AccountServiceId;
 }
 
 export interface ActionLogRecord {

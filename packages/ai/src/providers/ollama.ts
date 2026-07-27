@@ -6,6 +6,12 @@ import {
   generateConversationTitle
 } from "@heather/core";
 import type { ChatRequestPayload, ChatResponsePayload } from "@heather/core";
+import {
+  DEFAULT_OLLAMA_MODEL,
+  FALLBACK_OLLAMA_MODEL,
+  resolveOllamaFallbackModel
+} from "../ollama-config";
+import { formatOllamaChatError, OLLAMA_NOT_RUNNING_MESSAGE } from "../ollama-errors";
 import type {
   AIProvider,
   AIProviderConfig,
@@ -29,31 +35,22 @@ interface OllamaGenerateResponse {
   error?: string;
 }
 
-interface OllamaTagsResponse {
-  models?: Array<{
-    name?: string;
-    model?: string;
-  }>;
-}
-
-const DEFAULT_MODEL = "gemma4:latest";
-
 function compactContext(payload: ChatRequestPayload): string {
   const memories = payload.memories
     .filter((memory) => !memory.archived)
-    .slice(0, 4)
-    .map((memory) => `- ${memory.type}: ${memory.content.slice(0, 180)}`)
+    .slice(0, 6)
+    .map((memory) => `- ${memory.type}: ${memory.content.slice(0, 240)}`)
     .join("\n");
 
   const projects = payload.projects
-    .slice(0, 4)
+    .slice(0, 6)
     .map((project) => `- ${project.title}: ${project.status}/${project.priority}`)
     .join("\n");
 
   const automationRecipes = (payload.automationRecipes || [])
     .filter((recipe) => recipe.enabled)
-    .slice(0, 2)
-    .map((recipe) => describeAutomationRecipe(recipe).slice(0, 260))
+    .slice(0, 4)
+    .map((recipe) => describeAutomationRecipe(recipe).slice(0, 420))
     .join("\n\n");
 
   return [
@@ -70,73 +67,33 @@ function compactContext(payload: ChatRequestPayload): string {
   ].join("\n");
 }
 
+function buildChatMessages(payload: ChatRequestPayload): ChatMessage[] {
+  const history = payload.conversation?.messages
+    .filter((message) => message.role !== "system")
+    .slice(-6)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 1200)
+    }));
+
+  return [
+    { role: "system", content: buildHeatherSystemPrompt(payload.settings) },
+    { role: "system", content: compactContext(payload) },
+    ...(history || []),
+    { role: "user", content: payload.message }
+  ];
+}
+
 export function createOllamaProvider(config: AIProviderConfig): AIProvider {
   const baseUrl = (config.baseUrl || "http://localhost:11434").replace(/\/$/, "");
-  const defaultModel = config.model || DEFAULT_MODEL;
-
-  function mapOllamaError(message: string, status?: number): string {
-    const normalized = message.toLowerCase();
-    if (
-      status === 404 ||
-      normalized.includes("not found") ||
-      normalized.includes("model") && normalized.includes("pull")
-    ) {
-      return `Ollama 모델을 찾지 못했어요. 먼저 \`ollama pull ${DEFAULT_MODEL.replace(":latest", "")}\` 실행 후 다시 시도하세요.`;
-    }
-
-    return "Ollama가 실행 중인지 확인하세요. 터미널에서 `ollama serve`를 실행한 뒤 다시 시도하세요.";
-  }
-
-  async function listModels(): Promise<string[]> {
-    let response: Response;
-
-    try {
-      response = await fetch(`${baseUrl}/api/tags`);
-    } catch (error) {
-      throw new Error(mapOllamaError(error instanceof Error ? error.message : ""));
-    }
-
-    if (!response.ok) {
-      throw new Error(mapOllamaError("", response.status));
-    }
-
-    const data = (await response.json()) as OllamaTagsResponse;
-    return (data.models || [])
-      .map((model) => model.name || model.model || "")
-      .filter(Boolean);
-  }
-
-  async function resolveModel(requestedModel: string): Promise<string> {
-    const models = await listModels();
-    if (!models.length) {
-      throw new Error(
-        `Ollama에 설치된 모델이 없습니다. 먼저 \`ollama pull ${DEFAULT_MODEL.replace(":latest", "")}\` 실행 후 다시 시도하세요.`
-      );
-    }
-
-    const exact = models.find((model) => model === requestedModel);
-    if (exact) return exact;
-
-    const requestedBase = requestedModel.replace(/:latest$/, "");
-    const baseMatch = models.find((model) => model.replace(/:latest$/, "") === requestedBase);
-    if (baseMatch) return baseMatch;
-
-    throw new Error(mapOllamaError(`model ${requestedModel} not found`, 404));
-  }
+  const defaultModel = config.model || DEFAULT_OLLAMA_MODEL;
+  const fallbackModel = config.fallbackModel || resolveOllamaFallbackModel() || FALLBACK_OLLAMA_MODEL;
 
   async function chat(
     messages: ChatMessage[],
     options: ChatOptions = {}
   ): Promise<ProviderChatResponse> {
     const model = options.model || defaultModel;
-    return sendChat(messages, model, options);
-  }
-
-  async function sendChat(
-    messages: ChatMessage[],
-    model: string,
-    options: ChatOptions = {}
-  ): Promise<ProviderChatResponse> {
     let response: Response;
 
     try {
@@ -148,27 +105,26 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
         body: JSON.stringify({
           model,
           stream: false,
-          think: false,
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 900
+            num_predict: options.maxTokens || 700
           }
         })
       });
     } catch (error) {
-      throw new Error(mapOllamaError(error instanceof Error ? error.message : ""));
+      throw formatOllamaChatError(error, model);
     }
 
     const data = (await response.json()) as OllamaChatResponse;
 
     if (!response.ok) {
-      throw new Error(mapOllamaError(data.error || "", response.status));
+      throw formatOllamaChatError(new Error(data.error || OLLAMA_NOT_RUNNING_MESSAGE), model);
     }
 
     const content = data.message?.content?.trim();
     if (!content) {
-      throw new Error(mapOllamaError("Ollama returned an empty message."));
+      throw formatOllamaChatError(new Error(OLLAMA_NOT_RUNNING_MESSAGE), model);
     }
 
     return {
@@ -178,30 +134,29 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     };
   }
 
-  function asksCurrentProviderOrModel(message: string): boolean {
-    const normalized = message.toLowerCase();
-    const asksRuntime =
-      /모델|model|provider|프로바이더|제공자|엔진|backend|백엔드|api|런타임|runtime|상태|status|로컬\s*모델/.test(
-        normalized
-      );
-    const asksCurrent = /현재|지금|사용\s*중|쓰고|뭐야|무엇|알려|확인|check|current/.test(normalized);
+  async function chatWithModelFallback(
+    messages: ChatMessage[],
+    primaryModel: string,
+    options: ChatOptions = {}
+  ): Promise<ProviderChatResponse> {
+    try {
+      return await chat(messages, { ...options, model: primaryModel });
+    } catch (primaryError) {
+      if (fallbackModel && fallbackModel !== primaryModel) {
+        try {
+          return await chat(messages, { ...options, model: fallbackModel });
+        } catch {
+          throw formatOllamaChatError(primaryError, primaryModel);
+        }
+      }
 
-    return asksCurrent && asksRuntime;
-  }
-
-  function isSimpleFactualQuestion(message: string): boolean {
-    const normalized = message.trim().toLowerCase();
-    return (
-      normalized.length <= 120 &&
-      /^(what|who|when|where|which|how many|현재|지금|오늘|언제|어디|누구|무엇|뭐|몇)/.test(normalized) &&
-      !/분석|계획|전략|비교|보고서|초안|자세히|상세|deep|analyze|plan|strategy|compare/i.test(normalized)
-    );
+      throw formatOllamaChatError(primaryError, primaryModel);
+    }
   }
 
   return {
     id: "ollama",
     chat,
-    listModels,
     async isAvailable(): Promise<boolean> {
       try {
         const response = await fetch(`${baseUrl}/api/tags`);
@@ -211,65 +166,22 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
       }
     },
     async generateChat(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
-      const history = payload.conversation?.messages
-        .filter((message) => message.role !== "system")
-        .filter((message, index, messages) => {
-          const isLastMessage = index === messages.length - 1;
-          return !(isLastMessage && message.role === "user" && message.content.trim() === payload.message.trim());
-        })
-        .slice(-2)
-        .map((message) => ({
-          role: message.role,
-          content: message.content.slice(0, 500)
-        }));
-
-      const model = payload.settings.ollamaModel || defaultModel;
-      const executionContext = `현재 실행 환경: provider=ollama, model=${model}. 사용자가 현재 모델명이나 provider를 물으면 이 값을 직접 답한다.`;
-
-      if (asksCurrentProviderOrModel(payload.message)) {
-        return {
-          message: `현재 사용 중인 모델은 ${model}입니다. provider는 ollama입니다.`,
-          title: generateConversationTitle(payload.message),
-          risk: classifyActionRisk(payload.message),
-          provider: "ollama",
-          model
-        };
-      }
-
-      const response = await sendChat(
-        [
-          {
-            role: "system",
-            content: [
-              buildHeatherSystemPrompt(payload.settings),
-              executionContext,
-              "하드 응답 규칙: 사용자가 현재 모델, provider, backend, API 상태, 로컬 모델, 런타임 상태를 물으면 provider와 model 값을 직접 짧게 답한다.",
-              "단순 사실 질문은 1-3문장으로 답한다. 분석 질문일 때만 구조화된 상세 답변을 사용한다.",
-              "사용자가 명시적으로 요청하지 않는 한 심리 분석, 감정 추정, 투명성 논의로 확장하지 않는다.",
-              "응답은 사용자의 질문에 직접 답하고, 불필요한 내부 사고 과정을 쓰지 않는다."
-            ].join("\n")
-          },
-          { role: "system", content: compactContext(payload).slice(0, 1200) },
-          ...(history || []),
-          { role: "user", content: payload.message }
-        ],
-        model,
-        {
-          temperature: 0.6,
-          maxTokens: isSimpleFactualQuestion(payload.message) ? 350 : 900
-        }
-      );
+      const primaryModel = payload.settings.ollamaModel || defaultModel;
+      const messages = buildChatMessages(payload);
+      const response = await chatWithModelFallback(messages, primaryModel, {
+        temperature: 0.6,
+        maxTokens: 700
+      });
 
       return {
         message: response.content,
         title: generateConversationTitle(payload.message),
         risk: classifyActionRisk(payload.message),
-        provider: "ollama",
-        model: response.model || model
+        model: response.model
       };
     },
     async *streamChat(messages: ChatMessage[], options: ChatOptions = {}) {
-      const model = await resolveModel(options.model || defaultModel);
+      const model = options.model || defaultModel;
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: {
@@ -278,17 +190,16 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
         body: JSON.stringify({
           model,
           stream: true,
-          think: false,
           messages,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 900
+            num_predict: options.maxTokens || 700
           }
         })
       });
 
       if (!response.ok || !response.body) {
-        throw new Error(mapOllamaError("", response.status));
+        throw formatOllamaChatError(new Error(OLLAMA_NOT_RUNNING_MESSAGE), model);
       }
 
       const reader = response.body.getReader();
@@ -314,7 +225,6 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
     },
     async generate(messages: ChatMessage[], options: ChatOptions = {}) {
       const model = options.model || defaultModel;
-      const resolvedModel = await resolveModel(model);
       const prompt = messages.map((message) => `${message.role}: ${message.content}`).join("\n");
       const response = await fetch(`${baseUrl}/api/generate`, {
         method: "POST",
@@ -322,24 +232,24 @@ export function createOllamaProvider(config: AIProviderConfig): AIProvider {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: resolvedModel,
+          model,
           prompt,
           stream: false,
           options: {
             temperature: options.temperature ?? 0.6,
-            num_predict: options.maxTokens || 900
+            num_predict: options.maxTokens || 700
           }
         })
       });
 
       const data = (await response.json()) as OllamaGenerateResponse;
       if (!response.ok) {
-        throw new Error(mapOllamaError(data.error || "", response.status));
+        throw formatOllamaChatError(new Error(data.error || OLLAMA_NOT_RUNNING_MESSAGE), model);
       }
 
       return {
         content: data.response?.trim() || "",
-        model: data.model || resolvedModel,
+        model: data.model || model,
         raw: data
       };
     }

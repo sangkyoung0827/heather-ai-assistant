@@ -35,6 +35,7 @@ export interface AIProvider {
 export interface AIProviderConfig {
   apiKey?: string;
   model?: string;
+  fallbackModel?: string;
   baseUrl?: string;
 }
 

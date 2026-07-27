@@ -2,6 +2,7 @@ from collections import defaultdict, deque
 from importlib.metadata import version
 from time import monotonic
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.security import HTTPBearer
 from .auth import execution_context
 from .config import Settings
 from .models import ExecuteRequest, ExecutionContext, RouteRequest, RouteResponse, RunStatus, SkillRunResponse
@@ -16,6 +17,7 @@ workflow = PersonalMemorySummaryWorkflow(settings, gateway)
 search_workflow = SearchWorkflow(settings, SearchCache(settings))
 app = FastAPI(title="Heather Agent Runtime", version="0.1.0")
 rate_windows: dict[str, deque[float]] = defaultdict(deque)
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def rate_limit(context: ExecutionContext) -> None:
@@ -36,8 +38,9 @@ async def context_for(request: Request, locale: str = "ko") -> ExecutionContext:
 
 @app.get("/health")
 async def health() -> dict:
+    searxng_reachable = await search_workflow.searxng.health_check()
     providers = {
-        "searxng": {"status": "configured" if search_workflow.searxng.enabled else "not_configured"},
+        "searxng": {"status": "configured" if searxng_reachable else "not_configured"},
         "openalex": {"status": "configured" if settings.openalex_api_key else "free_no_key"},
         "crossref": {"status": "configured" if settings.crossref_mailto else "free_no_contact"},
         "pubmed": {"status": "configured" if settings.ncbi_api_key else "free_low_rate"},
@@ -48,7 +51,7 @@ async def health() -> dict:
     return {"status": "ok", "version": app.version, "nemo_agent_toolkit": version("nvidia-nat"), "providers": providers, "paid_fallback_enabled": False}
 
 
-@app.post("/v1/skills/route", response_model=RouteResponse)
+@app.post("/v1/skills/route", response_model=RouteResponse, dependencies=[Depends(bearer_scheme)])
 async def route_skill(payload: RouteRequest, request: Request) -> RouteResponse:
     await context_for(request, payload.locale)
     message = payload.message.casefold()
@@ -65,9 +68,14 @@ async def route_skill(payload: RouteRequest, request: Request) -> RouteResponse:
     return RouteResponse(skill_id="research_academic_discovery" if any(term in message for term in academic) else "research_web_discovery", confidence=0.91, reason="Explicit research discovery request.")
 
 
-@app.post("/v1/skills/execute", response_model=SkillRunResponse)
+@app.post("/v1/skills/execute", response_model=SkillRunResponse, dependencies=[Depends(bearer_scheme)])
 async def execute_skill(payload: ExecuteRequest, request: Request) -> SkillRunResponse:
     context = await context_for(request, payload.locale)
+    context = context.model_copy(update={
+        "research_scope": payload.research_scope,
+        "team_id": payload.team_id,
+        "project_id": payload.project_id,
+    })
     definition = SKILLS.get(payload.skill_id)
     if not definition or not definition.enabled:
         raise HTTPException(status_code=404, detail="Skill is not available.")
@@ -97,7 +105,7 @@ async def execute_skill(payload: ExecuteRequest, request: Request) -> SkillRunRe
         return SkillRunResponse(run_id=run_id, status=RunStatus.FAILED, skill_id=definition.id, error_code="search_execution_failed")
 
 
-@app.get("/v1/skill-runs/{run_id}", response_model=SkillRunResponse)
+@app.get("/v1/skill-runs/{run_id}", response_model=SkillRunResponse, dependencies=[Depends(bearer_scheme)])
 async def skill_run(run_id: str, request: Request, locale: str = "ko") -> SkillRunResponse:
     context = await context_for(request, locale)
     try:

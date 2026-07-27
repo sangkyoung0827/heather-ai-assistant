@@ -47,8 +47,12 @@ export async function POST(request: Request) {
     const skill = await runMatchedSkill(payload.message, payload.settings.defaultLanguage, request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null);
     if (skill) {
       await repository.logIntent("fallback", payload.message);
-      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: skill.message, source: "skill", replyTo: clientMessageId, metadata: { provider: "agent-runtime", model: skill.skillId } });
-      return NextResponse.json({ message: skill.message, title: createConversationTitle(payload.message, "general"), provider: "agent-runtime", model: skill.skillId, result: "skill", conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: assistant.id });
+      const sources = skill.sources || [];
+      const sourceHeading = payload.settings.defaultLanguage === "ko" ? "출처" : "Sources";
+      const citations = sources.map((source, index) => `[${index + 1}] ${source.title || "Untitled"}${source.url ? `\n${source.url}` : ""}`).join("\n\n");
+      const content = citations ? `${skill.message}\n\n${sourceHeading}\n${citations}` : skill.message;
+      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content, source: "skill", replyTo: clientMessageId, metadata: { provider: "agent-runtime", model: skill.skillId, search_used: true } });
+      return NextResponse.json({ message: content, title: createConversationTitle(payload.message, "general"), provider: "agent-runtime", model: skill.skillId, result: "skill", search: { used: true, skillId: skill.skillId, sources, cached: skill.cached || false }, conversationId: turn.conversation.id, userMessageId: turn.userMessage.id, assistantMessageId: assistant.id });
     }
 
     const fallbackResponse = await fetch(new URL("/api/chat", request.url), {

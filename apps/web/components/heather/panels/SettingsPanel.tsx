@@ -31,21 +31,21 @@ const AI_MODE_OPTIONS: Array<{
   icon: typeof HardDrive;
 }> = [
   {
-    value: "local_only",
-    label: "로컬만",
-    detail: "브라우저 안에서 답변",
-    icon: HardDrive
-  },
-  {
     value: "local_model",
     label: "로컬 모델",
-    detail: "Ollama 우선",
+    detail: "Ollama 로컬 모델 (기본)",
     icon: Cpu
+  },
+  {
+    value: "local_only",
+    label: "로컬만",
+    detail: "Ollama 우선, 오프라인 안내",
+    icon: HardDrive
   },
   {
     value: "cloud_allowed",
     label: "클라우드 허용",
-    detail: "한도 안에서만",
+    detail: "현재 비활성 (Ollama 사용)",
     icon: Cloud
   }
 ];
