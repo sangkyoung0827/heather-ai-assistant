@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Loader2,
   MessageSquarePlus,
   Mic,
   MicOff,
@@ -101,6 +100,7 @@ export function ChatPanel({
   const [isListening, setIsListening] = useState(false);
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
   const [providerStatus, setProviderStatus] = useState("대기 중");
+  const [thinkingStep, setThinkingStep] = useState(0);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -133,6 +133,18 @@ export function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [activeConversation?.messages.length, isSending]);
 
+  useEffect(() => {
+    if (!isSending) {
+      setThinkingStep(0);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setThinkingStep((current) => (current + 1) % RESPONSE_STEPS.length);
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [isSending]);
+
   async function handleNewConversation() {
     const conversation = createConversation();
     await onSaveConversation(conversation);
@@ -155,7 +167,7 @@ export function ChatPanel({
 
     setDraft("");
     setIsSending(true);
-    setProviderStatus("헤더가 맥락을 확인하는 중");
+    setProviderStatus("응답 준비 중");
 
     const baseConversation = activeConversation || createConversation(message);
     const userMessage = createMessage("user", message, inputSource);
@@ -181,7 +193,8 @@ export function ChatPanel({
       };
       const data = await resolveHeatherResponse(payload);
 
-      const assistantMessage = createMessage("assistant", data.message);
+      const responseMessage = removeMarkdownEmphasis(data.message);
+      const assistantMessage = createMessage("assistant", responseMessage);
       const finalConversation: Conversation = {
         ...optimisticConversation,
         title:
@@ -211,7 +224,7 @@ export function ChatPanel({
       }
 
       if (settings.voiceOutputEnabled) {
-        speakHeather(data.message, settings.voiceName);
+        speakHeather(responseMessage, settings.voiceName);
       }
     } catch (error) {
       const assistantMessage = createMessage(
@@ -409,7 +422,7 @@ export function ChatPanel({
                   ) : null}
                   <div className="dm-message-stack">
                     <div className="chat-message dm-message-bubble">
-                      <MessageContent content={message.content} />
+                      <MessageContent content={message.content} removeEmphasis={message.role === "assistant"} />
                     </div>
                     <div className="dm-message-meta">
                       {message.source === "voice" ? "voice · " : ""}
@@ -430,12 +443,7 @@ export function ChatPanel({
               <p className="dm-welcome-message">안녕하세요. 오늘은 무엇을 함께 이야기해볼까요?</p>
             </div>
           )}
-          {isSending && (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              헤더가 답변을 정리하고 있습니다.
-            </div>
-          )}
+          {isSending ? <ResponseProgress activeStep={thinkingStep} /> : null}
           <div ref={messagesEndRef} />
         </div>
 
@@ -495,10 +503,10 @@ export function ChatPanel({
               title="보내기"
               aria-label="보내기"
             >
-              {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              <Send className="h-5 w-5" />
             </button>
           </div>
-          <p className="dm-composer-status" role="status">{providerStatus}</p>
+          {!isSending ? <p className="dm-composer-status" role="status">{providerStatus}</p> : null}
         </div>
       </section>
     </div>
@@ -537,11 +545,22 @@ function formatProviderStatus(data: ApiChatResponse): string {
   return "로컬 Heather 응답";
 }
 
-function MessageContent({ content }: { content: string }) {
-  const parts = content.split(/(https?:\/\/[^\s]+)/g);
+const RESPONSE_STEPS = ["요청 이해", "맥락 정리", "답변 검토"];
+
+function ResponseProgress({ activeStep }: { activeStep: number }) {
+  return <div className="dm-response-progress" role="status" aria-live="polite"><span>Heather 응답 준비</span><ol>{RESPONSE_STEPS.map((step, index) => <li key={step} className={index === activeStep ? "is-active" : index < activeStep ? "is-complete" : ""}>{step}</li>)}</ol></div>;
+}
+
+function MessageContent({ content, removeEmphasis = false }: { content: string; removeEmphasis?: boolean }) {
+  const visibleContent = removeEmphasis ? removeMarkdownEmphasis(content) : content;
+  const parts = visibleContent.split(/(https?:\/\/[^\s]+)/g);
   return <div className="whitespace-pre-wrap">{parts.map((part, index) => /^https?:\/\//.test(part)
     ? <a key={index} href={part} target="_blank" rel="noreferrer" className="break-all text-heather-700 underline underline-offset-2">{part}</a>
     : part)}</div>;
+}
+
+function removeMarkdownEmphasis(value: string) {
+  return value.replace(/\*\*/g, "");
 }
 
 function incrementPaidApiCount(settings: HeatherSettings): HeatherSettings {

@@ -185,6 +185,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .dm-workspace.is-focus-mode .chat-conversation-panel { display: none; }
 .dm-workspace.is-focus-mode .dm-back { display: grid; }
 .dm-workspace .dm-message-area { flex: 1 1 0; min-height: 0; }
+.dm-response-progress { display: grid; gap: 8px; width: min(100%, 780px); margin: 18px auto 4px; color: var(--os-muted); font-size: 12px; }.dm-response-progress > span { color: var(--os-text); font-weight: 700; }.dm-response-progress ol { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; padding: 0; list-style: none; }.dm-response-progress li { border: 1px solid var(--os-line); border-radius: 999px; background: rgba(255,255,255,.025); padding: 5px 9px; color: var(--os-faint); transition: border-color 180ms ease, background 180ms ease, color 180ms ease; }.dm-response-progress li.is-active { border-color: var(--os-accent-border); background: var(--os-accent-soft); color: var(--os-text); }.dm-response-progress li.is-complete { color: var(--os-muted); }
 .dm-workspace .chat-composer-wrap { flex: 0 0 auto; z-index: 3; background: rgba(20,21,28,.98); }
 .dm-media-wrap { position: relative; flex: 0 0 auto; }
 .dm-media-menu { position: absolute; right: 0; bottom: 48px; z-index: 6; display: grid; min-width: 142px; gap: 3px; border: 1px solid var(--os-line); border-radius: 12px; background: #242530; box-shadow: 0 14px 32px rgba(0,0,0,.35); padding: 6px; }

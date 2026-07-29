@@ -1,2 +1,5 @@
-import { HeatherWorkspace } from "../../../components/heather/HeatherWorkspace";
-export default function ResearchMemoryPage() { return <HeatherWorkspace />; }
+import { redirect } from "next/navigation";
+
+export default function ResearchMemoryPage() {
+  redirect("/researcher/memory");
+}

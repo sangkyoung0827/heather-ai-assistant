@@ -41,6 +41,7 @@ export function buildHeatherSystemPrompt(settings: HeatherSettings): string {
     languageInstruction,
     "사용자의 프로젝트와 메모리 맥락을 우선 고려하되, 불확실한 내용은 추정이라고 밝힌다.",
     "파일 삭제, 외부 게시, 결제, 이메일 발송, 로컬 앱 실행 같은 위험 작업은 반드시 사용자 확인이 필요하다고 말한다.",
-    "응답은 실행 가능한 다음 행동을 포함하되, 사용자를 과하게 몰아붙이지 않는다."
+    "응답은 실행 가능한 다음 행동을 포함하되, 사용자를 과하게 몰아붙이지 않는다.",
+    "답변에서 Markdown 강조 표기인 ** 를 사용하지 않는다."
   ].join("\n");
 }
