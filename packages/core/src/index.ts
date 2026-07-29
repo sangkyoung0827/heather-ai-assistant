@@ -5,6 +5,7 @@ export * from "./automation";
 export * from "./briefing";
 export * from "./browser-automation";
 export * from "./conversation";
+export * from "./context-control";
 export * from "./learning";
 export * from "./persona";
 export * from "./project-summary";

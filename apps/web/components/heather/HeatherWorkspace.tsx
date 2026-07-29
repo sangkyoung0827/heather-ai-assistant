@@ -4,7 +4,7 @@ import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
-import { Bell, BookOpen, BrainCircuit, Check, Command, Database, Factory, FolderKanban, Home, Laptop, MessageSquare, Palette, Settings, Sparkles } from "lucide-react";
+import { Bell, BookOpen, BrainCircuit, Check, Command, Database, Factory, FolderKanban, Home, Laptop, MessageSquare, Palette, PlugZap, Settings, ShieldCheck, Sparkles } from "lucide-react";
 import type { HeatherAvatarVariant, MemoryRecord, ProjectRecord } from "@heather/core";
 import { useHeatherData } from "../../lib/use-heather-data";
 import { getHeatherMessages } from "../../lib/i18n";
@@ -19,9 +19,10 @@ import { ProcessPanel } from "./panels/ProcessPanel";
 import { ResearchChatPanel } from "./panels/ResearchChatPanel";
 import { ResearchMaterialsPanel } from "./panels/ResearchMaterialsPanel";
 import { ResearchMemoryPanel } from "./panels/ResearchMemoryPanel";
+import { ContextControlPanel } from "./panels/ContextControlPanel";
 import { HEATHER_AVATARS, HeatherAvatar } from "./HeatherAvatar";
 
-type WorkspaceId = "dashboard" | "chat" | "direct" | "personal" | "researcher" | "local" | "settings";
+type WorkspaceId = "dashboard" | "chat" | "direct" | "personal" | "researcher" | "projects" | "connections" | "approvals" | "contextImport" | "sensitive" | "local" | "settings";
 export type HeatherView = "briefing" | "chat" | "projects" | "memory" | "automation" | "direct_commands" | "local_control" | "training" | "analysis" | "settings";
 type Node = { id: WorkspaceId; label: string; detail: string; icon: LucideIcon; x: number; y: number; path: string };
 
@@ -30,14 +31,22 @@ const NODES: Node[] = [
   { id: "direct", label: "Direct Command Registration", detail: "Safe local actions", icon: Command, x: 210, y: 330, path: "/direct-commands" },
   { id: "chat", label: "Chat", detail: "Conversation layer", icon: MessageSquare, x: 790, y: 330, path: "/chat" },
   { id: "personal", label: "Personal Memory", detail: "Private recall", icon: Database, x: 300, y: 555, path: "/memory/personal" },
-  { id: "researcher", label: "Researcher", detail: "Materials & records", icon: BrainCircuit, x: 500, y: 625, path: "/researcher/chat" }
+  { id: "researcher", label: "Researcher", detail: "Materials & records", icon: BrainCircuit, x: 500, y: 625, path: "/researcher/chat" },
+  { id: "projects", label: "Projects", detail: "Context & resources", icon: FolderKanban, x: 0, y: 0, path: "/projects" },
+  { id: "connections", label: "Connections", detail: "Permissioned access", icon: PlugZap, x: 0, y: 0, path: "/connections" },
+  { id: "approvals", label: "Approvals", detail: "Review before action", icon: ShieldCheck, x: 0, y: 0, path: "/approvals" }
 ];
 
 function workspaceForPath(pathname: string): WorkspaceId {
   if (pathname.startsWith("/chat")) return "chat";
   if (pathname.startsWith("/direct-commands")) return "direct";
   if (pathname.startsWith("/memory/personal")) return "personal";
+  if (pathname.startsWith("/memory/context-import")) return "contextImport";
+  if (pathname.startsWith("/memory/sensitive")) return "sensitive";
   if (pathname.startsWith("/researcher")) return "researcher";
+  if (pathname.startsWith("/projects")) return "projects";
+  if (pathname.startsWith("/connections")) return "connections";
+  if (pathname.startsWith("/approvals")) return "approvals";
   if (pathname.startsWith("/local-control")) return "local";
   if (pathname.startsWith("/settings")) return "settings";
   return "dashboard";
@@ -88,11 +97,16 @@ function EmptyState({ text }: { text: string }) { return <p className="dashboard
 function Shortcut({ node, label, onNavigate }: { node: Node; label: string; onNavigate: (path: string) => void }) { const Icon = node.icon; return <button type="button" onClick={() => onNavigate(node.path)}><Icon className="h-4 w-4" />{label}</button>; }
 
 function railLabel(id: WorkspaceId, rail: ReturnType<typeof getHeatherMessages>["rail"]) {
+  if (id === "projects") return "Projects";
+  if (id === "connections") return "Connections";
+  if (id === "approvals") return "Approvals";
+  if (id === "contextImport") return "Context import";
+  if (id === "sensitive") return "Sensitive memory";
   return rail[id === "direct" ? "direct" : id];
 }
 
 function WorkspacePage({ workspace, pathname, node, data, onNavigate }: { workspace: WorkspaceId; pathname: string; node: Node; data: ReturnType<typeof useHeatherData>; onNavigate: (path: string) => void }) {
-  const meta: Record<WorkspaceId, [string, string]> = { dashboard: ["Dashboard", "Heather의 전체 구조와 최근 활동을 확인하세요."], chat: ["채팅", "Heather와 대화하며 작업을 요청하세요."], direct: ["직접명령 등록", "반복되는 질문과 응답을 저장하고 관리하세요."], personal: ["개인 메모리", "개인 정보, 관계, 선호와 결정을 관리하세요."], researcher: ["Researcher", "연구자료 등록과 연구 기록을 관리하세요."], local: ["Local Control", "안전한 로컬 기능을 관리하세요."], settings: ["Settings", "Heather 환경을 설정하세요."] };
+  const meta: Record<WorkspaceId, [string, string]> = { dashboard: ["Dashboard", "Heather의 전체 구조와 최근 활동을 확인하세요."], chat: ["채팅", "Heather와 대화하며 작업을 요청하세요."], direct: ["직접명령 등록", "반복되는 질문과 응답을 저장하고 관리하세요."], personal: ["개인 메모리", "개인 정보, 관계, 선호와 결정을 관리하세요."], researcher: ["Researcher", "연구자료 등록과 연구 기록을 관리하세요."], projects: ["프로젝트", "프로젝트, 별칭, 리소스를 안전하게 관리하세요."], connections: ["연결", "권한이 필요한 외부 연결을 확인하세요."], approvals: ["승인 센터", "실행 전 확인과 감사 기록을 관리하세요."], contextImport: ["개인 컨텍스트 가져오기", "검토한 seed 항목만 저장합니다."], sensitive: ["민감 메모리", "일반 채팅과 분리된 민감 컨텍스트입니다."], local: ["Local Control", "안전한 로컬 기능을 관리하세요."], settings: ["Settings", "Heather 환경을 설정하세요."] };
   const isEnglish = data.settings.defaultLanguage === "en";
   const [defaultTitle, defaultDescription] = workspace === "direct" && isEnglish ? ["Direct Command", "Create and manage reusable fixed responses."] : meta[workspace];
   const isBulkImport = pathname.startsWith("/direct-commands/bulk-import");
@@ -100,7 +114,7 @@ function WorkspacePage({ workspace, pathname, node, data, onNavigate }: { worksp
   const researcherMeta: Record<typeof researcherMode, [string, string]> = { chat: ["Heather Researcher", "연구 자료와 기록을 근거로 분석을 진행하세요."], materials: ["연구자료", "RAG 연구자료 연결은 준비 중입니다."], memory: ["연구 메모리", "검증된 연구 맥락과 기록을 분리해 관리하세요."], process: ["생산 공정", "수동 기록과 분석만 허용되는 안전한 공정 작업 공간입니다."] };
   const [title, description] = isBulkImport ? (isEnglish ? ["Bulk Import", "Review TXT, Markdown, JSON, CSV, PDF, or DOCX command files before registration."] : ["직접명령 대량 등록", "TXT, Markdown, JSON, CSV, PDF, DOCX 명령 파일을 검수 후 등록합니다."]) : workspace === "researcher" ? researcherMeta[researcherMode] : [defaultTitle, defaultDescription];
   const researcherItems = isEnglish ? [{ id: "chat", label: "Research chat", path: "/researcher/chat", icon: MessageSquare }, { id: "materials", label: "Research materials", path: "/researcher/materials", icon: BookOpen }, { id: "memory", label: "Research memory", path: "/researcher/memory", icon: Database }, { id: "process", label: "Process management", path: "/researcher/process", icon: Factory }] : [{ id: "chat", label: "연구원 채팅", path: "/researcher/chat", icon: MessageSquare }, { id: "materials", label: "연구자료", path: "/researcher/materials", icon: BookOpen }, { id: "memory", label: "연구 메모리", path: "/researcher/memory", icon: Database }, { id: "process", label: "생산 공정관리", path: "/researcher/process", icon: Factory }];
-  return <div className={workspace === "researcher" ? "researcher-page" : undefined}>{workspace === "researcher" ? <header className="researcher-shell-header"><div><span>Heather Researcher</span><h1>{isEnglish ? "A research partner for experiments, analysis, and production data" : "연구와 실험, 생산 데이터를 함께 분석하는 연구 파트너"}</h1></div><nav className="researcher-tabs" aria-label="Researcher navigation">{researcherItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => onNavigate(item.path)} className={researcherMode === item.id ? "is-active" : ""}><Icon />{item.label}</button>; })}</nav></header> : <header className="workspace-topbar"><button type="button" className="workspace-breadcrumb" onClick={() => onNavigate("/dashboard")}><Home className="h-4 w-4" /> Dashboard</button><div><h1>{title}</h1><p>{description}</p></div></header>}<section className={`workspace-canvas ${workspace === "researcher" ? "researcher-canvas" : ""}`}>{!data.ready ? <div className="workbench-loading">Heather 작업공간을 불러오는 중입니다.</div> : <>{workspace === "chat" && <ChatPanel conversations={data.conversations} memories={data.memories} projects={data.projects} teachings={data.teachings} automationRecipes={data.automationRecipes} settings={data.settings} onSaveConversation={data.saveConversation} onDeleteConversation={data.deleteConversation} onSaveMemory={data.saveMemory} onSaveSettings={data.saveSettings} />}{workspace === "direct" && (isBulkImport ? <BulkDirectCommandImportPanel locale={data.settings.defaultLanguage} /> : <DirectCommandRegistrationPanel locale={data.settings.defaultLanguage} />)}{workspace === "personal" && <MemoryPanel variant="personal" locale={data.settings.defaultLanguage} memories={data.memories} onSaveMemory={data.saveMemory} onDeleteMemory={data.deleteMemory} auth={data.auth} />}{workspace === "researcher" && researcherMode === "chat" && <ResearchChatPanel memories={data.memories} projects={data.projects} settings={data.settings} />}{workspace === "researcher" && researcherMode === "memory" && <MemoryPanel variant="research" locale={data.settings.defaultLanguage} memories={data.memories} onSaveMemory={data.saveMemory} onDeleteMemory={data.deleteMemory} auth={data.auth} />}{workspace === "researcher" && researcherMode === "materials" && <ResearchMaterialsPanel locale={data.settings.defaultLanguage} />}{workspace === "researcher" && researcherMode === "process" && <ProcessPanel />}{workspace === "local" && <LocalControlPanel settings={data.settings} onSaveSettings={data.saveSettings} />}{workspace === "settings" && <SettingsPanel settings={data.settings} onSaveSettings={data.saveSettings} onClearAll={data.clearAll} />}</>}</section></div>;
+  return <div className={workspace === "researcher" ? "researcher-page" : undefined}>{workspace === "researcher" ? <header className="researcher-shell-header"><div><span>Heather Researcher</span><h1>{isEnglish ? "A research partner for experiments, analysis, and production data" : "연구와 실험, 생산 데이터를 함께 분석하는 연구 파트너"}</h1></div><nav className="researcher-tabs" aria-label="Researcher navigation">{researcherItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => onNavigate(item.path)} className={researcherMode === item.id ? "is-active" : ""}><Icon />{item.label}</button>; })}</nav></header> : <header className="workspace-topbar"><button type="button" className="workspace-breadcrumb" onClick={() => onNavigate("/dashboard")}><Home className="h-4 w-4" /> Dashboard</button><div><h1>{title}</h1><p>{description}</p></div></header>}<section className={`workspace-canvas ${workspace === "researcher" ? "researcher-canvas" : ""}`}>{!data.ready ? <div className="workbench-loading">Heather 작업공간을 불러오는 중입니다.</div> : <>{workspace === "chat" && <ChatPanel conversations={data.conversations} memories={data.memories} projects={data.projects} teachings={data.teachings} automationRecipes={data.automationRecipes} settings={data.settings} onSaveConversation={data.saveConversation} onDeleteConversation={data.deleteConversation} onSaveMemory={data.saveMemory} onSaveSettings={data.saveSettings} />}{workspace === "direct" && (isBulkImport ? <BulkDirectCommandImportPanel locale={data.settings.defaultLanguage} /> : <DirectCommandRegistrationPanel locale={data.settings.defaultLanguage} />)}{workspace === "personal" && <MemoryPanel variant="personal" locale={data.settings.defaultLanguage} memories={data.memories} onSaveMemory={data.saveMemory} onDeleteMemory={data.deleteMemory} auth={data.auth} />}{workspace === "researcher" && researcherMode === "chat" && <ResearchChatPanel memories={data.memories} projects={data.projects} settings={data.settings} />}{workspace === "researcher" && researcherMode === "memory" && <MemoryPanel variant="research" locale={data.settings.defaultLanguage} memories={data.memories} onSaveMemory={data.saveMemory} onDeleteMemory={data.deleteMemory} auth={data.auth} />}{workspace === "researcher" && researcherMode === "materials" && <ResearchMaterialsPanel locale={data.settings.defaultLanguage} />}{workspace === "researcher" && researcherMode === "process" && <ProcessPanel />}{workspace === "projects" && <ContextControlPanel mode="projects" />}{workspace === "connections" && <ContextControlPanel mode="connections" />}{workspace === "approvals" && <ContextControlPanel mode="approvals" />}{workspace === "contextImport" && <ContextControlPanel mode="import" />}{workspace === "sensitive" && <ContextControlPanel mode="sensitive" />}{workspace === "local" && <LocalControlPanel settings={data.settings} onSaveSettings={data.saveSettings} />}{workspace === "settings" && <SettingsPanel settings={data.settings} onSaveSettings={data.saveSettings} onClearAll={data.clearAll} />}</>}</section></div>;
 }
 
 function ResearchEmptyPanel({ title, description }: { title: string; description: string }) { return <div className="workspace-empty"><strong>{title}</strong><p>{description}</p></div>; }

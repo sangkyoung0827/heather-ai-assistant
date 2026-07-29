@@ -11,6 +11,7 @@ import { runAgentSearch, type SearchSource } from "../../../lib/agent-runtime-se
 import { resolveModelProfile } from "../../../lib/llm/config";
 import { buildLlmMessages } from "../../../lib/llm/messages";
 import { generateForModelRole } from "../../../lib/llm/service";
+import { enrichChatPayloadFromContext } from "../../../lib/context-control/server";
 
 export const runtime = "nodejs";
 
@@ -31,11 +32,15 @@ globalThis.heatherChatCache = chatCache;
 
 export async function POST(request: Request) {
   try {
-    const payload = (await request.json()) as ChatRequestPayload;
+    const receivedPayload = (await request.json()) as ChatRequestPayload;
 
-    if (!payload.message?.trim()) {
+    if (!receivedPayload.message?.trim()) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
+
+    // The resolver is optional and read-only. Existing chat behavior remains available when
+    // the new control-plane migration is not installed or the visitor is signed out.
+    const payload = await enrichChatPayloadFromContext(request, receivedPayload);
 
     const agentSearch = await runAgentSearch(
       payload.message,

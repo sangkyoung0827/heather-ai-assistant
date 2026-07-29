@@ -1,0 +1,4 @@
+[
+  {"memory_type":"project","title":"Heather 핵심 결정","content":"Ollama는 Heather runtime에 연결하고 Codex는 개발 도구로만 사용한다. 유료 검색 fallback은 비활성화하며 생산공정은 연구용 시뮬레이션으로 표시한다.","structured_content":{"project_slug":"heather-ai-assistant"},"sensitivity":"normal","confidence":0.9,"temporal_stability":"review_periodically","source":"user-provided seed","last_reviewed_at":"2026-07-29","recommended_action":"import"},
+  {"memory_type":"project","title":"K_LINE 보존 제약","content":"기존 ECC 운영 기능과 회원 구조는 실제 사용 가능성이 있으므로 임의 삭제나 대규모 변경을 하지 않는다.","structured_content":{"project_slug":"k-line"},"sensitivity":"normal","confidence":0.86,"temporal_stability":"stable","source":"user-provided seed","last_reviewed_at":"2026-07-29","recommended_action":"import"}
+]

@@ -1,0 +1,4 @@
+[
+  {"memory_type":"identity","title":"기본 프로필","content":"이상경은 전북대학교 역사학과에 재학 중이며 한국어를 주 언어로 사용한다. 영어를 사용할 수 있고 스페인어 회화 및 러시아어 학습에 관심이 있다.","structured_content":{"name":"이상경","primary_language":"ko","school":"전북대학교","major":"역사학과","languages":["한국어","영어","스페인어 회화","러시아어 학습 관심"]},"sensitivity":"normal","confidence":0.82,"temporal_stability":"stable","source":"user-provided seed","last_reviewed_at":"2026-07-29","recommended_action":"import"},
+  {"memory_type":"identity","title":"활동과 장기 목표","content":"AI·교육·국제교류·창업·연구 프로젝트를 동시에 운영하며, 여러 프로젝트를 통합 관리하는 개인 AI 운영체제를 구축 중이다.","structured_content":{"roles":["AI","교육","국제교류","창업","연구"],"long_term_goal":"개인 AI 운영체제 구축"},"sensitivity":"normal","confidence":0.78,"temporal_stability":"review_periodically","source":"user-provided seed","last_reviewed_at":"2026-07-29","recommended_action":"import"}
+]

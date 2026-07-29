@@ -1,0 +1,3 @@
+[
+  {"memory_type":"sensitive","title":"민감정보 검토 필요","content":"건강, 재정, 가족·연애, 법적 문제, 타인 개인정보, 군 관련 정보, 인증정보 범주의 과거 대화가 존재할 수 있습니다. 자동 저장하지 않고 별도 검토가 필요합니다.","structured_content":{"categories":["health","finance","family","relationship","legal","third_party","military","credentials"]},"sensitivity":"sensitive","confidence":0.6,"temporal_stability":"review_periodically","source":"review-only seed","last_reviewed_at":"2026-07-29","recommended_action":"exclude"}
+]

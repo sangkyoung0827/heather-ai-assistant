@@ -1,0 +1,3 @@
+[
+  {"memory_type":"operational","title":"Heather 운영 상태","content":"Heather Phase 9 생산공정관리 구현과 Personal Context & Project Control Plane을 병행한다. 해커톤 핵심 시연은 생산공정관리다.","structured_content":{"project_slug":"heather-ai-assistant","phase":"Phase 9","next":"Control Plane 검토"},"sensitivity":"normal","confidence":0.82,"temporal_stability":"volatile","source":"user-provided seed","last_reviewed_at":"2026-07-29","valid_until":"2026-08-29","recommended_action":"review"}
+]

@@ -1,0 +1,4 @@
+[
+  {"memory_type":"preference","title":"응답 및 개발 안내 선호","content":"한국어 기본, 논리적·분석적 설명, 단계별 명확한 안내, 실제 실행 여부의 정확한 구분을 선호한다. 기존 사용자 변경을 삭제하지 않고 Git status와 diff를 먼저 확인한다.","structured_content":{"language":"ko","style":["logical","analytical","step_by_step"],"engineering":["preserve_user_changes","verify_before_claiming","check_git_status_and_diff"]},"sensitivity":"normal","confidence":0.9,"temporal_stability":"review_periodically","source":"user-provided seed","last_reviewed_at":"2026-07-29","recommended_action":"import"},
+  {"memory_type":"preference","title":"비용과 승인 정책","content":"실제 비밀키를 코드나 Git에 저장하지 않고, 유료 API 자동 fallback 및 사용자 승인 없는 유료 호출을 금지한다.","structured_content":{"paid_api":"approval_required","secrets":"never_store_in_source","approval":"required_for_paid_calls"},"sensitivity":"normal","confidence":0.92,"temporal_stability":"stable","source":"user-provided seed","last_reviewed_at":"2026-07-29","recommended_action":"import"}
+]
