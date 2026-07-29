@@ -31,10 +31,7 @@ const NODES: Node[] = [
   { id: "direct", label: "Direct Command Registration", detail: "Safe local actions", icon: Command, x: 210, y: 330, path: "/direct-commands" },
   { id: "chat", label: "Chat", detail: "Conversation layer", icon: MessageSquare, x: 790, y: 330, path: "/chat" },
   { id: "personal", label: "Personal Memory", detail: "Private recall", icon: Database, x: 300, y: 555, path: "/memory/personal" },
-  { id: "researcher", label: "Researcher", detail: "Materials & records", icon: BrainCircuit, x: 500, y: 625, path: "/researcher/chat" },
-  { id: "projects", label: "Projects", detail: "Context & resources", icon: FolderKanban, x: 0, y: 0, path: "/projects" },
-  { id: "connections", label: "Connections", detail: "Permissioned access", icon: PlugZap, x: 0, y: 0, path: "/connections" },
-  { id: "approvals", label: "Approvals", detail: "Review before action", icon: ShieldCheck, x: 0, y: 0, path: "/approvals" }
+  { id: "researcher", label: "Researcher", detail: "Materials & records", icon: BrainCircuit, x: 500, y: 625, path: "/researcher/chat" }
 ];
 
 function workspaceForPath(pathname: string): WorkspaceId {
@@ -94,7 +91,8 @@ const ACCENT_THEMES = { violet: { accent: "#a78bfa", strong: "#7c5ce6", soft: "r
 function DashboardMetric({ icon: Icon, label, value, detail, onClick }: { icon: LucideIcon; label: string; value: string; detail: string; onClick: () => void }) { return <button type="button" onClick={onClick} className="dashboard-metric"><span><Icon className="h-4 w-4" />{label}</span><strong>{value}</strong><small>{detail}</small></button>; }
 function DashboardPanel({ title, action, onAction, children }: { title: string; action: string; onAction: () => void; children: ReactNode }) { return <section className="dashboard-panel"><header><h3>{title}</h3><button type="button" onClick={onAction}>{action} ›</button></header>{children}</section>; }
 function EmptyState({ text }: { text: string }) { return <p className="dashboard-empty">{text}</p>; }
-function Shortcut({ node, label, onNavigate }: { node: Node; label: string; onNavigate: (path: string) => void }) { const Icon = node.icon; return <button type="button" onClick={() => onNavigate(node.path)}><Icon className="h-4 w-4" />{label}</button>; }
+function Shortcut({ node, label, onNavigate }: { node: Node; label: string; onNavigate: (path: string) => void }) { const Icon = node.icon; return <>{<button type="button" onClick={() => onNavigate(node.path)}><Icon className="h-4 w-4" />{label}</button>}{node.id === "researcher" ? <DashboardControlLinks onNavigate={onNavigate} /> : null}</>; }
+function DashboardControlLinks({ onNavigate }: { onNavigate: (path: string) => void }) { const items = [{ label: "Projects", icon: FolderKanban, path: "/projects" }, { label: "Connections", icon: PlugZap, path: "/connections" }, { label: "Approval center", icon: ShieldCheck, path: "/approvals" }]; return <div className="dashboard-control-links"><span>Control center</span><div>{items.map((item) => { const Icon = item.icon; return <button key={item.path} type="button" onClick={() => onNavigate(item.path)}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></div>; }
 
 function railLabel(id: WorkspaceId, rail: ReturnType<typeof getHeatherMessages>["rail"]) {
   if (id === "projects") return "Projects";
