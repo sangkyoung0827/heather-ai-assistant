@@ -104,7 +104,8 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
     } finally { setSaving(false); }
   }
 
-  if (auth && (!auth.ready || !auth.user)) return <MemoryAuthGate copy={copy} auth={auth} />;
+  if (auth && !auth.ready) return <section className="memory-auth-gate"><div><p>로그인 상태를 확인하는 중입니다.</p></div></section>;
+  if (auth && !auth.user) return <MemoryAuthGate copy={copy} auth={auth} />;
 
   return <div className={`memory-workspace simple-memory-workspace ${mobileView === "editor" ? "is-mobile-editor" : "is-mobile-list"}`}>
     <aside className="memory-browser simple-memory-list">

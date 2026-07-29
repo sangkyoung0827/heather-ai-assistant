@@ -13,6 +13,7 @@ import { BrowserHeatherDatabase, createDefaultSettings } from "@heather/db";
 import type { User } from "@supabase/supabase-js";
 import { SupabaseMemoryRepository } from "./memory-repository";
 import { getSupabaseBrowserClient } from "./supabase-client";
+import { restoreHeatherSession, syncHeatherSession } from "./auth-session";
 
 function sortByUpdated<T extends { updated_at?: string; updatedAt?: string; created_at?: string; createdAt?: string }>(
   items: T[]
@@ -76,15 +77,21 @@ export function useHeatherData() {
   useEffect(() => {
     const client = getSupabaseBrowserClient();
     if (!client) { setAuthReady(true); return; }
-    // Restore the saved browser session before a background token refresh completes.
-    void client.auth.getSession().then(({ data }) => {
-      const restoredUser = data.session?.user || null;
+    let active = true;
+    const applySession = (session: Awaited<ReturnType<typeof restoreHeatherSession>>) => {
+      if (!active) return;
+      const restoredUser = session?.user || null;
       setUser(restoredUser);
       setAuthReady(true);
       void reloadMemories(restoredUser);
+    };
+    // Restore and refresh the persisted browser session before protected pages render their sign-in gate.
+    void restoreHeatherSession().then(applySession).catch(() => applySession(null));
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      syncHeatherSession(session);
+      applySession(session);
     });
-    const { data: listener } = client.auth.onAuthStateChange((_event, session) => { setUser(session?.user || null); setAuthReady(true); void reloadMemories(session?.user || null); });
-    return () => listener.subscription.unsubscribe();
+    return () => { active = false; listener.subscription.unsubscribe(); };
   }, [reloadMemories]);
 
   const saveSettings = useCallback(
@@ -187,7 +194,7 @@ export function useHeatherData() {
     const { error } = await client.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback` } });
     if (error) throw error;
   }, []);
-  const signOut = useCallback(async () => { const client = getSupabaseBrowserClient(); if (client) await client.auth.signOut({ scope: "local" }); }, []);
+  const signOut = useCallback(async () => { const client = getSupabaseBrowserClient(); if (client) await client.auth.signOut({ scope: "local" }); syncHeatherSession(null); }, []);
 
   return {
     ready,

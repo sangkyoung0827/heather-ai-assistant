@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
+import { syncHeatherSession } from "../../../lib/auth-session";
 
 export default function AuthCallbackPage() {
-  const router = useRouter(); const [message, setMessage] = useState("Signing you in...");
+  const [message, setMessage] = useState("Signing you in...");
   useEffect(() => {
     let active = true;
 
@@ -34,8 +34,12 @@ export default function AuthCallbackPage() {
           const { data, error } = await client.auth.getSession();
           if (error || !data.session) throw error || new Error("No session returned from OAuth.");
         }
+        const { data: persisted, error: persistedError } = await client.auth.getSession();
+        if (persistedError || !persisted.session) throw persistedError || new Error("No saved session was available after OAuth.");
+        syncHeatherSession(persisted.session);
         window.history.replaceState({}, document.title, window.location.pathname);
-        if (active) router.replace("/dashboard");
+        // A full navigation makes every workspace initialize from the same persisted session.
+        if (active) window.location.replace("/dashboard");
       } catch (error) {
         if (active) setMessage(error instanceof Error ? `Sign-in could not be completed: ${error.message}` : "Sign-in could not be completed. Please try again.");
       }
@@ -43,6 +47,6 @@ export default function AuthCallbackPage() {
 
     void completeSignIn();
     return () => { active = false; };
-  }, [router]);
+  }, []);
   return <main className="grid min-h-screen place-items-center bg-[#090a0d] text-slate-100"><p>{message}</p></main>;
 }
