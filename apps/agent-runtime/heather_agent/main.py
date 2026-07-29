@@ -1,11 +1,13 @@
 from collections import defaultdict, deque
 from importlib.metadata import version
 from time import monotonic
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPBearer
 from .auth import execution_context
 from .config import Settings
 from .models import ExecuteRequest, ExecutionContext, RouteRequest, RouteResponse, RunStatus, SkillRunResponse
+from .production import ProductionCompareRequest, ProductionExperimentPlan, ProductionExperimentRequest, ProductionParseRequest, parse_instruction, simulate
 from .registry import SKILLS
 from .supabase import SupabaseGateway
 from .workflow import PersonalMemorySummaryWorkflow
@@ -112,3 +114,80 @@ async def skill_run(run_id: str, request: Request, locale: str = "ko") -> SkillR
         return await gateway.get_run(context, run_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail="Skill run not found.") from error
+
+
+@app.post("/v1/production/parse", dependencies=[Depends(bearer_scheme)])
+async def parse_production_experiment(payload: ProductionParseRequest, request: Request, locale: str = "ko") -> dict:
+    await context_for(request, locale)
+    try:
+        plan = parse_instruction(payload.instruction, payload.random_seed)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error), "message": "The requested simulation condition is outside the selected profile envelope."}) from error
+    return {"plan": plan.model_dump(), "requires_confirmation": True, "simulation_only": True}
+
+
+@app.post("/v1/production/experiments", dependencies=[Depends(bearer_scheme)])
+async def create_production_experiment(payload: ProductionExperimentRequest, request: Request, locale: str = "ko") -> dict:
+    context = await context_for(request, locale)
+    try:
+        plan = payload.plan or parse_instruction(payload.instruction, payload.random_seed)
+        row = await gateway.create_production_experiment(context, payload.instruction, plan.model_dump(), payload.title or f"DHA simulation {plan.profile_id}")
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": str(error), "message": "The requested simulation condition is outside the selected profile envelope."}) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="Production experiment storage is unavailable. Apply migration 008 and retry.") from error
+    return {"experiment": row, "requires_confirmation": True}
+
+
+@app.post("/v1/production/experiments/{experiment_id}/run", dependencies=[Depends(bearer_scheme)])
+async def run_production_experiment(experiment_id: str, request: Request, locale: str = "ko") -> dict:
+    context = await context_for(request, locale)
+    try:
+        experiment = await gateway.get_production_experiment(context, experiment_id)
+        result = simulate(ProductionExperimentPlan.model_validate(experiment["parsed_plan"]))
+        payload = result.model_dump()
+        await gateway.complete_production_experiment(context, experiment_id, payload)
+        return {"experiment_id": experiment_id, "status": "completed", "result": payload}
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail="Production experiment not found.") from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="Production experiment storage is unavailable.") from error
+
+
+@app.get("/v1/production/experiments", dependencies=[Depends(bearer_scheme)])
+async def list_production_experiments(request: Request, locale: str = "ko", limit: int = 25) -> dict:
+    context = await context_for(request, locale)
+    try:
+        return {"experiments": await gateway.list_production_experiments(context, limit)}
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="Production experiment storage is unavailable.") from error
+
+
+@app.get("/v1/production/experiments/{experiment_id}", dependencies=[Depends(bearer_scheme)])
+async def get_production_experiment(experiment_id: str, request: Request, locale: str = "ko") -> dict:
+    context = await context_for(request, locale)
+    try:
+        return {"experiment": await gateway.get_production_experiment(context, experiment_id)}
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail="Production experiment not found.") from error
+
+
+@app.post("/v1/production/compare", dependencies=[Depends(bearer_scheme)])
+async def compare_production_experiments(payload: ProductionCompareRequest, request: Request, locale: str = "ko") -> dict:
+    context = await context_for(request, locale)
+    experiments = [await gateway.get_production_experiment(context, experiment_id) for experiment_id in payload.experiment_ids]
+    completed = [item for item in experiments if item.get("final_result")]
+    if len(completed) < 2:
+        raise HTTPException(status_code=422, detail="At least two completed simulations are required for comparison.")
+    baseline, candidate = completed[0], completed[1]
+    left, right = baseline["final_result"]["final_metrics"], candidate["final_result"]["final_metrics"]
+    return {"comparison": {"baseline_id": baseline["id"], "candidate_id": candidate["id"], "dha_g_l_delta": round(right["final_dha_g_l"] - left["final_dha_g_l"], 3), "dha_percent_delta": round(right["dha_percent_total_fatty_acids"] - left["dha_percent_total_fatty_acids"], 2), "biomass_delta": round(right["final_biomass_g_l"] - left["final_biomass_g_l"], 3), "tradeoff": "Simulation-only comparison. DHA percentage and total DHA concentration can move in different directions; laboratory validation is required."}}
+
+
+@app.post("/v1/production/experiments/{experiment_id}/literature", dependencies=[Depends(bearer_scheme)])
+async def production_literature(experiment_id: str, request: Request, locale: str = "ko") -> dict:
+    context = await context_for(request, locale)
+    experiment = await gateway.get_production_experiment(context, experiment_id)
+    query = "Schizochytrium DHA nitrogen limitation dissolved oxygen fed-batch"
+    result = await search_workflow.execute(context, "research_academic_discovery", query)
+    return {"experiment_id": experiment["id"], "query": query, "sources": result["sources"][:5], "evidence_level": "metadata_only", "limitation": "Metadata-only sources do not support strong causal conclusions."}

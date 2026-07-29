@@ -81,6 +81,51 @@ class SupabaseGateway:
             response = await client.post(f"{self.settings.supabase_url.rstrip('/')}/rest/v1/research_search_runs", headers={**self.headers(context), "Prefer": "return=minimal"}, json=payload)
         response.raise_for_status()
 
+    async def create_production_experiment(self, context: ExecutionContext, instruction: str, plan: dict, title: str) -> dict:
+        payload = {"user_id": context.user_id, "title": title, "original_instruction": instruction, "parsed_plan": plan, "objective": plan["objective"], "profile_id": plan["profile_id"], "model_version": "phase9-simulation-1.0.0", "random_seed": plan["random_seed"], "status": "ready"}
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(f"{self.settings.supabase_url.rstrip('/')}/rest/v1/production_experiments", headers={**self.headers(context), "Prefer": "return=representation"}, json=payload)
+        response.raise_for_status()
+        return response.json()[0]
+
+    async def get_production_experiment(self, context: ExecutionContext, experiment_id: str) -> dict:
+        url = f"{self.settings.supabase_url.rstrip('/')}/rest/v1/production_experiments?id=eq.{quote(experiment_id)}&select=*"
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url, headers=self.headers(context))
+        response.raise_for_status()
+        rows = response.json()
+        if not rows:
+            raise LookupError("production_experiment_not_found")
+        return rows[0]
+
+    async def list_production_experiments(self, context: ExecutionContext, limit: int = 25) -> list[dict]:
+        url = f"{self.settings.supabase_url.rstrip('/')}/rest/v1/production_experiments?select=id,title,objective,profile_id,status,final_result,recommended_harvest_hour,created_at,completed_at&order=created_at.desc&limit={min(max(limit, 1), 50)}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url, headers=self.headers(context))
+        response.raise_for_status()
+        return response.json()
+
+    async def complete_production_experiment(self, context: ExecutionContext, experiment_id: str, result: dict) -> None:
+        payload = {"status": "completed", "final_result": result, "recommended_harvest_hour": result["recommended_harvest_hour"], "started_at": datetime.utcnow().isoformat() + "Z", "completed_at": datetime.utcnow().isoformat() + "Z"}
+        base = self.settings.supabase_url.rstrip('/')
+        async with httpx.AsyncClient(timeout=25) as client:
+            response = await client.patch(f"{base}/rest/v1/production_experiments?id=eq.{quote(experiment_id)}", headers={**self.headers(context), "Prefer": "return=minimal"}, json=payload)
+            response.raise_for_status()
+            points = [{"experiment_id": experiment_id, "time_h": point["time_h"], "phase": point["phase"], "measurements": point} for point in result["time_series"]]
+            if points:
+                response = await client.post(f"{base}/rest/v1/production_experiment_timepoints", headers={**self.headers(context), "Prefer": "return=minimal"}, json=points)
+                response.raise_for_status()
+            events = [{"experiment_id": experiment_id, "time_h": event["time_h"], "event_type": event["event_type"], "severity": event["severity"], "message": event["message"], "payload": event} for event in result["events"]]
+            if events:
+                response = await client.post(f"{base}/rest/v1/production_experiment_events", headers={**self.headers(context), "Prefer": "return=minimal"}, json=events)
+                response.raise_for_status()
+            analysis = result["analysis"][0]
+            response = await client.post(f"{base}/rest/v1/production_experiment_analyses", headers={**self.headers(context), "Prefer": "return=minimal"}, json={"experiment_id": experiment_id, "analysis_type": "simulation_summary", "content": analysis, "evidence_level": analysis["evidence_level"], "confidence": analysis["confidence"]})
+            response.raise_for_status()
+            memory = result["memory_candidate"]
+            response = await client.post(f"{base}/rest/v1/production_memory_candidates", headers={**self.headers(context), "Prefer": "return=minimal"}, json={"experiment_id": experiment_id, "user_id": context.user_id, "content": memory["content"], "structured_content": memory, "confidence": result["confidence"], "status": "suggested"})
+            response.raise_for_status()
+
 
 def parse_count(content_range: str | None) -> int:
     try:
