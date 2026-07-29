@@ -76,7 +76,13 @@ export function useHeatherData() {
   useEffect(() => {
     const client = getSupabaseBrowserClient();
     if (!client) { setAuthReady(true); return; }
-    void client.auth.getUser().then(({ data }) => { setUser(data.user); setAuthReady(true); void reloadMemories(data.user); });
+    // Restore the saved browser session before a background token refresh completes.
+    void client.auth.getSession().then(({ data }) => {
+      const restoredUser = data.session?.user || null;
+      setUser(restoredUser);
+      setAuthReady(true);
+      void reloadMemories(restoredUser);
+    });
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => { setUser(session?.user || null); setAuthReady(true); void reloadMemories(session?.user || null); });
     return () => listener.subscription.unsubscribe();
   }, [reloadMemories]);
@@ -181,7 +187,7 @@ export function useHeatherData() {
     const { error } = await client.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/auth/callback` } });
     if (error) throw error;
   }, []);
-  const signOut = useCallback(async () => { const client = getSupabaseBrowserClient(); if (client) await client.auth.signOut(); }, []);
+  const signOut = useCallback(async () => { const client = getSupabaseBrowserClient(); if (client) await client.auth.signOut({ scope: "local" }); }, []);
 
   return {
     ready,

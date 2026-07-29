@@ -16,6 +16,7 @@ export function getSupabaseBrowserClient() {
     browserClient = createClient(url, anonKey, {
       auth: {
         persistSession: true,
+        autoRefreshToken: true,
         flowType: "pkce",
         // The callback page completes both PKCE and legacy implicit flows explicitly.
         detectSessionInUrl: false

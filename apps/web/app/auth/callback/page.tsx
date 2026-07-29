@@ -35,7 +35,7 @@ export default function AuthCallbackPage() {
           if (error || !data.session) throw error || new Error("No session returned from OAuth.");
         }
         window.history.replaceState({}, document.title, window.location.pathname);
-        if (active) router.replace("/memory/personal");
+        if (active) router.replace("/dashboard");
       } catch (error) {
         if (active) setMessage(error instanceof Error ? `Sign-in could not be completed: ${error.message}` : "Sign-in could not be completed. Please try again.");
       }
