@@ -30,6 +30,8 @@ import type {
 } from "@heather/core";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 import { HeatherAvatar } from "../HeatherAvatar";
+import { ThinkingStatusPanel } from "../chat/ThinkingStatusPanel";
+import { readChatProgressStream, type ChatProgressEvent, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -100,8 +102,9 @@ export function ChatPanel({
   const [isListening, setIsListening] = useState(false);
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
   const [providerStatus, setProviderStatus] = useState("대기 중");
-  const [thinkingStep, setThinkingStep] = useState(0);
+  const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposingRef = useRef(false);
@@ -133,17 +136,7 @@ export function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [activeConversation?.messages.length, isSending]);
 
-  useEffect(() => {
-    if (!isSending) {
-      setThinkingStep(0);
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setThinkingStep((current) => (current + 1) % RESPONSE_STEPS.length);
-    }, 1400);
-    return () => window.clearInterval(timer);
-  }, [isSending]);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function handleNewConversation() {
     const conversation = createConversation();
@@ -168,6 +161,9 @@ export function ChatPanel({
     setDraft("");
     setIsSending(true);
     setProviderStatus("응답 준비 중");
+    setProgressEvents([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const baseConversation = activeConversation || createConversation(message);
     const userMessage = createMessage("user", message, inputSource);
@@ -191,7 +187,9 @@ export function ChatPanel({
         teachings,
         automationRecipes
       };
-      const data = await resolveHeatherResponse(payload);
+      const data = await resolveHeatherResponse(payload, (event) => {
+        if (event.type === "progress") setProgressEvents((current) => [...current, event.data]);
+      }, controller.signal);
 
       const responseMessage = removeMarkdownEmphasis(data.message);
       const assistantMessage = createMessage("assistant", responseMessage);
@@ -227,6 +225,11 @@ export function ChatPanel({
         speakHeather(responseMessage, settings.voiceName);
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setProgressEvents((current) => [...current, createClientProgressEvent("cancelled", "cancelled", 100)]);
+        setProviderStatus("응답 생성을 중단했습니다.");
+        return;
+      }
       const assistantMessage = createMessage(
         "assistant",
         `지금 응답을 완성하지 못했어요. ${error instanceof Error ? error.message : "알 수 없는 오류"}`
@@ -239,15 +242,23 @@ export function ChatPanel({
       setProviderStatus("오류 발생");
     } finally {
       setInputSource("text");
+      abortRef.current = null;
       setIsSending(false);
     }
   }
 
-  async function resolveHeatherResponse(payload: ChatRequestPayload): Promise<ApiChatResponse> {
-    const cached = payload.settings.cacheResponses ? readCachedResponse(payload) : null;
-    if (cached) {
+  function handleStopResponse() {
+    abortRef.current?.abort();
+  }
+
+  async function resolveHeatherResponse(payload: ChatRequestPayload, onEvent: (event: ChatStreamEvent) => void, signal: AbortSignal): Promise<ApiChatResponse> {
+    const cachedResponse = payload.settings.cacheResponses ? readCachedResponse(payload) : null;
+    if (cachedResponse) {
+      onEvent({ type: "progress", data: createClientProgressEvent("request_received", "completed", 10) });
+      onEvent({ type: "progress", data: createClientProgressEvent("response_composition", "completed", 92, "cache") });
+      onEvent({ type: "progress", data: createClientProgressEvent("completed", "completed", 100, "cache") });
       return {
-        ...cached,
+        ...cachedResponse,
         cached: true
       };
     }
@@ -257,15 +268,29 @@ export function ChatPanel({
     if (session?.data.session?.access_token) headers.Authorization = `Bearer ${session.data.session.access_token}`;
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers,
-      body: JSON.stringify(payload)
+      headers: { ...headers, Accept: "text/event-stream" },
+      body: JSON.stringify(payload),
+      signal
     });
 
-    const data = (await response.json()) as ApiChatResponse;
-
-    if (!response.ok || data.error) {
+    if (!response.ok) {
+      const data = await response.json() as ApiChatResponse;
       throw new Error(data.error || "Heather chat request failed.");
     }
+
+    let message = "";
+    let provider: string | undefined;
+    let model: string | undefined;
+    let wasCached = false;
+    let streamError: string | undefined;
+    await readChatProgressStream(response, (event) => {
+      onEvent(event);
+      if (event.type === "content_delta") message += event.data.text;
+      if (event.type === "done") { provider = event.data.provider; model = event.data.model; wasCached = Boolean(event.data.cached); }
+      if (event.type === "error") streamError = event.data.user_message;
+    });
+    if (streamError || !message) throw new Error(streamError || "Heather chat request failed.");
+    const data: ApiChatResponse = { message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Text response." }, provider, model, cached: wasCached };
 
     if (payload.settings.cacheResponses) {
       writeCachedResponse(payload, data);
@@ -443,7 +468,7 @@ export function ChatPanel({
               <p className="dm-welcome-message">안녕하세요. 오늘은 무엇을 함께 이야기해볼까요?</p>
             </div>
           )}
-          {isSending ? <ResponseProgress activeStep={thinkingStep} /> : null}
+          {(isSending || progressEvents.length) ? <ThinkingStatusPanel events={progressEvents} isRunning={isSending} locale={settings.defaultLanguage} onCancel={handleStopResponse} /> : null}
           <div ref={messagesEndRef} />
         </div>
 
@@ -545,11 +570,7 @@ function formatProviderStatus(data: ApiChatResponse): string {
   return "로컬 Heather 응답";
 }
 
-const RESPONSE_STEPS = ["요청 이해", "맥락 정리", "답변 검토"];
-
-function ResponseProgress({ activeStep }: { activeStep: number }) {
-  return <div className="dm-response-progress" role="status" aria-live="polite"><span>Heather 응답 준비</span><ol>{RESPONSE_STEPS.map((step, index) => <li key={step} className={index === activeStep ? "is-active" : index < activeStep ? "is-complete" : ""}>{step}</li>)}</ol></div>;
-}
+function createClientProgressEvent(stage: ChatProgressEvent["stage"], status: ChatProgressEvent["status"], progress: number, sourceType?: ChatProgressEvent["source_type"]): ChatProgressEvent { const now = new Date().toISOString(); return { id: `client:${stage}:${now}`, request_id: "client-cache", stage, status, progress, source_type: sourceType, started_at: now, completed_at: now, duration_ms: 0 }; }
 
 function MessageContent({ content, removeEmphasis = false }: { content: string; removeEmphasis?: boolean }) {
   const visibleContent = removeEmphasis ? removeMarkdownEmphasis(content) : content;
