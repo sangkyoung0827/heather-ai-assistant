@@ -332,6 +332,8 @@ class SearchWorkflow:
         if not query:
             raise ProviderError("query_required")
         scope = context.research_scope or "personal"
+        provider_statuses: list[dict[str, object]] = []
+        provider_name = "searxng"
         if skill_id == "general_web_search":
             sources, cached = await self.cache.get_or_create(f"{skill_id}:{context.locale}:searxng:{scope}:{query.casefold()}", lambda: self.searxng.search(query))
         elif skill_id == "research_web_discovery":
@@ -339,10 +341,17 @@ class SearchWorkflow:
         else:
             provider = self.europe_pmc if choose_academic_provider(query) == "europe_pmc" else self.openalex
             sources, cached = await self.cache.get_or_create(f"{skill_id}:{context.locale}:{provider.name}:{scope}:{query.casefold()}", lambda: provider.search(query))
+            provider_name = provider.name
+            provider_statuses.append({"provider": provider.name, "status": "completed", "candidate_count": len(sources)})
             if not sources and provider.name == "openalex":
+                provider_statuses[-1]["status"] = "warning"
                 sources, cached = await self.cache.get_or_create(f"{skill_id}:{context.locale}:crossref:{scope}:{query.casefold()}", lambda: self.crossref.search(query))
+                provider_name = "crossref"
+                provider_statuses.append({"provider": "crossref", "status": "completed", "candidate_count": len(sources)})
         sources = sources[:5]
-        return {"query": query, "message": await self._synthesize(query, sources, context.locale), "sources": [source.public() for source in sources], "cached": cached, "provider": "searxng" if skill_id != "research_academic_discovery" else choose_academic_provider(query), "paid_api_calls": 0}
+        if not provider_statuses:
+            provider_statuses.append({"provider": provider_name, "status": "completed", "candidate_count": len(sources)})
+        return {"query": query, "message": await self._synthesize(query, sources, context.locale), "sources": [source.public() for source in sources], "cached": cached, "provider": provider_name, "providers": provider_statuses, "paid_api_calls": 0}
 
     async def _synthesize(self, query: str, sources: list[ResearchSource], locale: str) -> str:
         if not sources:

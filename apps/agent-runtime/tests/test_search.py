@@ -47,3 +47,18 @@ def test_search_cache_reuses_same_scope_and_keeps_paid_calls_zero() -> None:
         assert second["sources"][0]["provider"] == "searxng"
 
     asyncio.run(run())
+
+
+def test_academic_search_reports_the_provider_that_returned_sources() -> None:
+    async def run() -> None:
+        workflow = SearchWorkflow(settings(), SearchCache(settings()))
+
+        async def fake_search(query: str) -> list[ResearchSource]:
+            return [ResearchSource(canonical_id="openalex:test", source_type="article", title=query, url="https://example.com/paper", authors=[], provider_name="openalex")]
+
+        workflow.openalex.search = fake_search  # type: ignore[method-assign]
+        result = await workflow.execute(context(), "research_academic_discovery", "DHA process paper")
+        assert result["provider"] == "openalex"
+        assert result["providers"] == [{"provider": "openalex", "status": "completed", "candidate_count": 1}]
+
+    asyncio.run(run())

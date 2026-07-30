@@ -2,16 +2,19 @@
 /* eslint-disable @next/next/no-img-element -- local previews and short-lived signed attachment URLs are runtime-only. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Circle, FlaskConical, ImagePlus, MessageSquarePlus, Mic, MicOff, Paperclip, Search, Send, Smile, Trash2, X } from "lucide-react";
+import { FlaskConical, ImagePlus, MessageSquarePlus, Mic, MicOff, Paperclip, Search, Send, Smile, Trash2, X } from "lucide-react";
 import { createMessage } from "@heather/core";
 import type { ChatRequestPayload, HeatherSettings, MemoryRecord, MessageAttachment, ProjectRecord } from "@heather/core";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { useConversationStore } from "../../../lib/conversations/use-conversation-store";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 import { cleanResearchDisplayText } from "../../../lib/research/response";
+import { readChatProgressStream, type ChatProgressEvent, type ChatStreamEvent } from "../../../lib/chat/progress-events";
+import { ThinkingStatusPanel } from "../chat/ThinkingStatusPanel";
 
 type ResearchResponse = { message?: string; title?: string; conversationId?: string; error?: string; provider?: string; model?: string };
 type UploadResponse = { conversationId?: string; attachments?: MessageAttachment[]; error?: string };
+type StreamDone = { conversationId?: string; title?: string; provider?: string; model?: string };
 type DraftAttachment = { id: string; file: File; previewUrl: string };
 const EMOJIS = ["🧪", "🔬", "📊", "🧬", "⚗️", "💡", "✅", "📌"];
 type SpeechRecognitionResultLike = { transcript: string };
@@ -28,9 +31,9 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
   const [isSending, setIsSending] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
-  const [progressIndex, setProgressIndex] = useState(0);
-  const [canSearch, setCanSearch] = useState(false);
+  const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
   const lockRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -38,16 +41,11 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
   const locale = settings.defaultLanguage;
   const copy = locale === "en" ? EN : KO;
   const researchMemories = useMemo(() => memories.filter((memory) => !memory.archived && (memory.type === "project_context" || memory.source.startsWith("research"))), [memories]);
-  const progressSteps = useMemo(() => getResearchProgress(copy, researchMemories.length, canSearch), [copy, researchMemories.length, canSearch]);
 
   useEffect(() => { const timer = window.setTimeout(() => { void searchConversations(search); }, 180); return () => window.clearTimeout(timer); }, [search, searchConversations]);
   useEffect(() => { const area = textareaRef.current; if (!area) return; area.style.height = "0px"; area.style.height = `${Math.min(area.scrollHeight, 128)}px`; }, [draft]);
   useEffect(() => () => attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl)), [attachments]);
-  useEffect(() => {
-    if (!isSending) { setProgressIndex(0); return; }
-    const timer = window.setInterval(() => setProgressIndex((current) => Math.min(current + 1, progressSteps.length - 1)), 900);
-    return () => window.clearInterval(timer);
-  }, [isSending, progressSteps.length]);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   function addFiles(files: FileList | File[]) {
     const next = Array.from(files).filter((file) => ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type) && file.size <= 10 * 1024 * 1024).slice(0, 10 - attachments.length);
@@ -76,7 +74,9 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
   async function send() {
     const message = draft.trim();
     if ((!message && !attachments.length) || isSending || lockRef.current) return;
-    lockRef.current = true; setCanSearch(false); setIsSending(true); setDraft(""); setShowEmoji(false);
+    lockRef.current = true; setIsSending(true); setDraft(""); setShowEmoji(false); setProgressEvents([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     const userMessage = createMessage("user", message, "text", { attachments: attachments.map((attachment) => ({ id: attachment.id, type: "image", storagePath: "", mimeType: attachment.file.type, sizeBytes: attachment.file.size, status: "ready", url: attachment.previewUrl })) });
     const files = attachments.map((attachment) => attachment.file);
     setAttachments([]); applyOptimistic(userMessage);
@@ -93,15 +93,31 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
       const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId, conversation: activeConversation || undefined, messageAlreadyPersisted, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [] };
       const session = await getSupabaseBrowserClient()?.auth.getSession();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (session?.data.session?.access_token) { headers.Authorization = `Bearer ${session.data.session.access_token}`; setCanSearch(true); }
-      const response = await fetch("/api/research/chat", { method: "POST", headers, body: JSON.stringify(payload) });
-      const data = await response.json() as ResearchResponse;
-      if (!response.ok || !data.message || !data.conversationId) throw new Error(data.error || copy.sendFailed);
-      applyOptimistic(createMessage("assistant", data.message, "text", { provider: data.provider || "nvidia", model: data.model }));
-      await refreshAfterSend(data.conversationId);
+      if (session?.data.session?.access_token) headers.Authorization = `Bearer ${session.data.session.access_token}`;
+      const response = await fetch("/api/research/chat", { method: "POST", headers: { ...headers, Accept: "text/event-stream" }, body: JSON.stringify(payload), signal: controller.signal });
+      if (!response.ok) {
+        const data = await response.json() as ResearchResponse;
+        throw new Error(data.error || copy.sendFailed);
+      }
+      let responseMessage = "";
+      let done: StreamDone = {};
+      let streamError: string | undefined;
+      await readChatProgressStream(response, (event: ChatStreamEvent) => {
+        if (event.type === "progress") setProgressEvents((current) => [...current, event.data].slice(-40));
+        if (event.type === "content_delta") responseMessage += event.data.text;
+        if (event.type === "done") done = { conversationId: event.data.conversation_id, title: event.data.title, provider: event.data.provider, model: event.data.model };
+        if (event.type === "error") streamError = event.data.user_message;
+      });
+      if (streamError || !responseMessage || !done.conversationId) throw new Error(streamError || copy.sendFailed);
+      applyOptimistic(createMessage("assistant", responseMessage, "text", { provider: done.provider || "nvidia", model: done.model }));
+      await refreshAfterSend(done.conversationId);
     } catch (error) {
-      applyOptimistic({ ...createMessage("assistant", `${copy.failed} ${error instanceof Error ? error.message : copy.retry}`), status: "failed" });
-    } finally { lockRef.current = false; setIsSending(false); }
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setProgressEvents((current) => [...current, createClientProgressEvent("cancelled", "cancelled", 100)]);
+      } else {
+        applyOptimistic({ ...createMessage("assistant", `${copy.failed} ${error instanceof Error ? error.message : copy.retry}`), status: "failed" });
+      }
+    } finally { abortRef.current = null; lockRef.current = false; setIsSending(false); }
   }
 
   return <div className="research-chat-shell" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
@@ -112,7 +128,7 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
     </aside>
     <section className="research-chat-main">
       <header className="research-chat-header"><div><span className="research-header-badge"><FlaskConical />{copy.researcher}</span><h2>{activeConversation?.title || copy.newResearch}</h2></div><HeatherAvatar settings={settings} size="medium" researcher /></header>
-      <div className="research-message-area heather-scrollbar">{activeConversation?.messages.length ? <><button type="button" className="research-load-more" onClick={() => void loadOlderMessages()}>{copy.loadOlder}</button><div className="research-thread">{activeConversation.messages.map((message) => <ResearchMessage key={message.id} message={message} settings={settings} onRetry={() => setDraft(message.content)} />)}</div></> : <ResearchWelcome settings={settings} copy={copy} onPrompt={setDraft} />}{isSending ? <ResearchProgress copy={copy} steps={progressSteps} activeIndex={progressIndex} /> : null}</div>
+      <div className="research-message-area heather-scrollbar">{activeConversation?.messages.length ? <><button type="button" className="research-load-more" onClick={() => void loadOlderMessages()}>{copy.loadOlder}</button><div className="research-thread">{activeConversation.messages.map((message) => <ResearchMessage key={message.id} message={message} settings={settings} onRetry={() => setDraft(message.content)} />)}</div></> : <ResearchWelcome settings={settings} copy={copy} onPrompt={setDraft} />}{progressEvents.length ? <ThinkingStatusPanel events={progressEvents} isRunning={isSending} locale={locale} mode="research" onCancel={() => abortRef.current?.abort()} /> : null}</div>
       <footer className="research-composer-wrap">{attachments.length ? <div className="research-attachment-strip">{attachments.map((attachment) => <div key={attachment.id}><img src={attachment.previewUrl} alt="" /><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={copy.removePhoto}><X /></button></div>)}</div> : null}<div className="research-composer"><span className="research-emoji-wrap"><button type="button" onClick={() => setShowEmoji((open) => !open)} aria-label={copy.emoji} title={copy.emoji}><Smile /></button>{showEmoji ? <span className="research-emoji-picker">{EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</span> : null}</span><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.photos} title={copy.photos}><ImagePlus /></button><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.file} title={copy.file}><Paperclip /></button><input ref={imageInputRef} className="dm-hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} /><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); addFiles(event.clipboardData.files); } }} placeholder={copy.placeholder} rows={1} /><button type="button" onClick={toggleListening} className={isListening ? "is-listening" : ""} aria-label={isListening ? copy.stopListening : copy.voiceInput} title={isListening ? copy.stopListening : copy.voiceInput}>{isListening ? <MicOff /> : <Mic />}</button><button type="button" onClick={() => void send()} disabled={(!draft.trim() && !attachments.length) || isSending} className="research-send" aria-label={copy.send}>{isSending ? <span aria-hidden="true">...</span> : <Send />}</button></div></footer>
     </section>
   </div>;
@@ -121,8 +137,7 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
 function ResearchWelcome({ settings, copy, onPrompt }: { settings: HeatherSettings; copy: typeof KO; onPrompt: (value: string) => void }) { return <div className="research-welcome"><div className="research-welcome-avatar"><HeatherAvatar settings={settings} size="large" researcher /><FlaskConical /></div><h2>Heather Researcher</h2><span>{copy.welcome}</span><div>{copy.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => onPrompt(prompt)}>{prompt}</button>)}</div></div>; }
 function ResearchMessage({ message, settings, onRetry }: { message: { role: string; content: string; status?: string; attachments?: MessageAttachment[] }; settings: HeatherSettings; onRetry: () => void }) { const isUser = message.role === "user"; return <article className={`research-message ${isUser ? "is-user" : "is-heather"}`}>{!isUser ? <HeatherAvatar settings={settings} size="small" researcher /> : null}<div>{message.attachments?.length ? <div className="research-image-grid">{message.attachments.map((attachment) => attachment.url ? <img key={attachment.id} src={attachment.url} alt="" /> : null)}</div> : null}{message.content ? <div className="research-message-content">{renderResearchContent(message.content)}</div> : null}{message.status === "failed" ? <button type="button" className="research-retry" onClick={onRetry}>다시 시도</button> : null}</div></article>; }
 function renderResearchContent(content: string) { return cleanResearchDisplayText(content).split(/\n{2,}/).map((block, index) => { const section = block.match(/^(핵심 결론|근거|한계|권장 후속 조치|출처|Key conclusion|Evidence|Limitations|Recommended next steps|Sources)\s*:\s*([\s\S]*)$/i); return section ? <section key={index} className="research-report-section"><strong>{section[1]}</strong><p>{section[2]}</p></section> : <p key={index}>{block}</p>; }); }
-function ResearchProgress({ copy, steps, activeIndex }: { copy: typeof KO; steps: Array<{ label: string; detail: string }>; activeIndex: number }) { return <aside className="research-progress" aria-live="polite"><div><strong>{copy.progressTitle}</strong><span>{copy.progressNote}</span></div><ol>{steps.map((step, index) => <li key={step.label} className={index < activeIndex ? "is-complete" : index === activeIndex ? "is-active" : ""}>{index < activeIndex ? <Check /> : <Circle />}<span><b>{step.label}</b><small>{step.detail}</small></span></li>)}</ol></aside>; }
-function getResearchProgress(copy: typeof KO, memoryCount: number, canSearch: boolean) { return [{ label: copy.progressRequest, detail: copy.progressRequestDetail }, { label: copy.progressMemory, detail: memoryCount ? copy.progressMemoryFound.replace("{count}", String(memoryCount)) : copy.progressMemoryEmpty }, { label: canSearch ? copy.progressSearch : copy.progressScope, detail: canSearch ? copy.progressSearchDetail : copy.progressScopeDetail }, { label: copy.progressReview, detail: copy.progressReviewDetail }, { label: copy.progressDraft, detail: copy.progressDraftDetail }]; }
+function createClientProgressEvent(stage: ChatProgressEvent["stage"], status: ChatProgressEvent["status"], progress: number): ChatProgressEvent { const now = new Date().toISOString(); return { id: `client:${stage}:${now}`, request_id: "client-cancel", stage, status, progress, source_type: "research_analysis", started_at: now, completed_at: now, duration_ms: 0 }; }
 function formatDate(value: string, locale: "ko" | "en") { return new Intl.DateTimeFormat(locale === "ko" ? "ko-KR" : "en-US", { month: "short", day: "numeric" }).format(new Date(value)); }
 
 const KO = { researcher: "Heather Researcher", conversations: "연구 대화", researchChat: "연구원 채팅", newConversation: "새 연구 대화", newResearch: "새 연구 대화", search: "연구 대화 검색", noMessages: "아직 메시지가 없습니다.", archive: "연구 대화 보관", loading: "연구 대화를 불러오는 중입니다.", emptyConversations: "저장된 연구 대화가 없습니다.", loadMore: "더 보기", loadOlder: "이전 메시지 불러오기", welcome: "연구와 실험, 데이터를 함께 분석하는 AI 연구원", prompts: ["실험 결과 해석", "연구 가설 정리", "연구 메모 작성", "변수 간 관계 분석", "후속 실험 설계"], progressTitle: "연구 요청 진행 상황", progressNote: "Heather가 수행 중인 연결·검토 단계를 표시합니다.", progressRequest: "질문 범위 확인", progressRequestDetail: "연구 목표와 필요한 결과 형식을 정리합니다.", progressMemory: "연구 메모 연결", progressMemoryFound: "관련된 저장 연구 메모리 {count}개를 확인합니다.", progressMemoryEmpty: "관련 저장 메모리가 없어 새 근거를 우선 확인합니다.", progressSearch: "학술 출처 경로 요청", progressSearchDetail: "Agent Runtime에 허용된 학술·공식 출처 조회를 요청합니다.", progressScope: "제공 자료 범위 확인", progressScopeDetail: "로그인 세션 또는 검색 결과 없이 제공된 자료만 검토합니다.", progressReview: "근거와 출처 검토", progressReviewDetail: "확인된 자료와 추정 내용을 구분합니다.", progressDraft: "답변 구성", progressDraftDetail: "결론, 근거, 한계와 후속 조치를 정리합니다.", placeholder: "연구 질문이나 실험 내용을 입력하세요...", photos: "사진", file: "파일 선택", removePhoto: "첨부 사진 제거", emoji: "이모지 선택", voiceInput: "음성 입력", stopListening: "음성 입력 중지", send: "연구 요청 보내기", uploadFailed: "사진을 업로드하지 못했습니다.", sendFailed: "연구 요청을 보내지 못했습니다.", failed: "연구 응답을 완성하지 못했습니다.", retry: "잠시 후 다시 시도해주세요." };

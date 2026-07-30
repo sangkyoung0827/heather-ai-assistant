@@ -273,3 +273,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .production-source { display: grid; gap: 4px; margin-top: 8px; border: 1px solid var(--os-line); border-radius: 9px; color: var(--os-text); padding: 10px; text-decoration: none; }
 .production-source:hover { border-color: var(--os-accent-border); color: var(--os-accent); }
 .production-source small { color: var(--os-muted); font-size: 11px; }
+
+/* Researcher reuses the shared progress surface with a slower evidence-oriented orbital mode. */
+.thinking-status-panel.is-research { border-color: rgba(66,214,194,.3); background: rgba(8,29,33,.72); }
+.thinking-status-panel.is-research .thinking-progress-track span { background: var(--research-teal); }
+.thinking-status-panel.is-research .thinking-active-mark { background: var(--research-teal); box-shadow: 0 0 0 3px rgba(66,214,194,.16); }
+.thinking-status-panel.is-research .heather-orbital { color: var(--research-teal); }
+.heather-orbital.is-research .orbit-one { animation-duration: 7.2s; }
+.heather-orbital.is-research .orbit-two { animation-duration: 5.6s; }
+.heather-orbital.is-research .orbit-three { animation-duration: 4.4s; }
+.heather-orbital-research-nodes { fill: rgba(148,239,226,.28); stroke: rgba(148,239,226,.26); stroke-width: .75; }
+.heather-orbital-research-nodes circle.is-confirmed { fill: #9ef2e4; filter: drop-shadow(0 0 3px rgba(158,242,228,.65)); }
+.heather-orbital.is-validating .heather-orbital-research-nodes circle { animation: heather-node-settle 1.8s ease-in-out infinite; }
+.heather-orbital.is-comparing .heather-orbital-research-nodes path { stroke: currentColor; stroke-dasharray: 3 2; animation: heather-dash 1.7s linear infinite; }
+.heather-orbital.is-synthesizing .heather-orbital-research-nodes circle { animation: heather-node-settle 1.4s ease-in-out infinite; }
+.heather-orbital.is-candidate_preparation .heather-orbital-research-nodes { animation: heather-candidate-shift 1.8s ease-in-out infinite; }
+.tool-status-summary { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.tool-status-summary span, .tool-status-summary small { display: inline-flex; align-items: center; min-height: 21px; border: 1px solid rgba(66,214,194,.2); border-radius: 999px; background: rgba(66,214,194,.06); color: #a8d5d0; padding: 2px 7px; font-size: 10px; line-height: 1.2; }
+.tool-status-summary span.is-active { border-color: rgba(66,214,194,.55); color: #c4fff5; }
+.tool-status-summary span.is-warning, .tool-status-summary span.is-failed { border-color: rgba(228,184,107,.45); color: #f0cc82; }
+.thinking-status-copy li small { display: block; margin-top: 2px; color: var(--os-muted); font-size: 10px; line-height: 1.35; }
+.research-message-area > .thinking-status-panel { width: min(100%, 820px); margin-top: 20px; }
+@keyframes heather-node-settle { 50% { transform: translate(1px,-1px); opacity: .68; } }
+@keyframes heather-dash { to { stroke-dashoffset: -10; } }
+@keyframes heather-candidate-shift { 50% { transform: translate(2px,-2px); } }
+@media (prefers-reduced-motion: reduce) { .heather-orbital-research-nodes, .heather-orbital-research-nodes circle, .heather-orbital-research-nodes path { animation: none !important; } }
