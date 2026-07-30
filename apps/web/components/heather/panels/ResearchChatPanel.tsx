@@ -35,6 +35,7 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
   const lockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const messageAreaRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseDraftRef = useRef("");
@@ -44,6 +45,14 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
 
   useEffect(() => { const timer = window.setTimeout(() => { void searchConversations(search); }, 180); return () => window.clearTimeout(timer); }, [search, searchConversations]);
   useEffect(() => { const area = textareaRef.current; if (!area) return; area.style.height = "0px"; area.style.height = `${Math.min(area.scrollHeight, 128)}px`; }, [draft]);
+  useEffect(() => {
+    const area = messageAreaRef.current;
+    if (!area) return;
+    const frame = window.requestAnimationFrame(() => {
+      area.scrollTo({ top: area.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeConversation?.id, activeConversation?.messages.length, isSending, progressEvents.length]);
   useEffect(() => () => attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl)), [attachments]);
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -128,7 +137,7 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
     </aside>
     <section className="research-chat-main">
       <header className="research-chat-header"><div><span className="research-header-badge"><FlaskConical />{copy.researcher}</span><h2>{activeConversation?.title || copy.newResearch}</h2></div><HeatherAvatar settings={settings} size="medium" researcher /></header>
-      <div className="research-message-area heather-scrollbar">{activeConversation?.messages.length ? <><button type="button" className="research-load-more" onClick={() => void loadOlderMessages()}>{copy.loadOlder}</button><div className="research-thread">{activeConversation.messages.map((message) => <ResearchMessage key={message.id} message={message} settings={settings} onRetry={() => setDraft(message.content)} />)}</div></> : <ResearchWelcome settings={settings} copy={copy} onPrompt={setDraft} />}{progressEvents.length ? <ThinkingStatusPanel events={progressEvents} isRunning={isSending} locale={locale} mode="research" onCancel={() => abortRef.current?.abort()} /> : null}</div>
+      <div ref={messageAreaRef} className="research-message-area heather-scrollbar">{activeConversation?.messages.length ? <><button type="button" className="research-load-more" onClick={() => void loadOlderMessages()}>{copy.loadOlder}</button><div className="research-thread">{activeConversation.messages.map((message) => <ResearchMessage key={message.id} message={message} settings={settings} onRetry={() => setDraft(message.content)} />)}</div></> : <ResearchWelcome settings={settings} copy={copy} onPrompt={setDraft} />}{progressEvents.length ? <ThinkingStatusPanel events={progressEvents} isRunning={isSending} locale={locale} mode="research" onCancel={() => abortRef.current?.abort()} /> : null}</div>
       <footer className="research-composer-wrap">{attachments.length ? <div className="research-attachment-strip">{attachments.map((attachment) => <div key={attachment.id}><img src={attachment.previewUrl} alt="" /><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={copy.removePhoto}><X /></button></div>)}</div> : null}<div className="research-composer"><span className="research-emoji-wrap"><button type="button" onClick={() => setShowEmoji((open) => !open)} aria-label={copy.emoji} title={copy.emoji}><Smile /></button>{showEmoji ? <span className="research-emoji-picker">{EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</span> : null}</span><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.photos} title={copy.photos}><ImagePlus /></button><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.file} title={copy.file}><Paperclip /></button><input ref={imageInputRef} className="dm-hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} /><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); addFiles(event.clipboardData.files); } }} placeholder={copy.placeholder} rows={1} /><button type="button" onClick={toggleListening} className={isListening ? "is-listening" : ""} aria-label={isListening ? copy.stopListening : copy.voiceInput} title={isListening ? copy.stopListening : copy.voiceInput}>{isListening ? <MicOff /> : <Mic />}</button><button type="button" onClick={() => void send()} disabled={(!draft.trim() && !attachments.length) || isSending} className="research-send" aria-label={copy.send}>{isSending ? <span aria-hidden="true">...</span> : <Send />}</button></div></footer>
     </section>
   </div>;

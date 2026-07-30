@@ -105,7 +105,8 @@ export function ChatPanel({
   const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messageAreaRef = useRef<HTMLDivElement | null>(null);
+  const sendLockRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposingRef = useRef(false);
 
@@ -133,8 +134,13 @@ export function ChatPanel({
   }, [activeConversationId, conversations]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [activeConversation?.messages.length, isSending]);
+    const area = messageAreaRef.current;
+    if (!area) return;
+    const frame = window.requestAnimationFrame(() => {
+      area.scrollTo({ top: area.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeConversation?.id, activeConversation?.messages.length, isSending, progressEvents.length]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -156,8 +162,9 @@ export function ChatPanel({
 
   async function handleSend() {
     const message = (textareaRef.current?.value ?? draft).trim();
-    if (!message || isSending) return;
+    if (!message || isSending || sendLockRef.current) return;
 
+    sendLockRef.current = true;
     setDraft("");
     setIsSending(true);
     setProviderStatus("응답 준비 중");
@@ -243,6 +250,7 @@ export function ChatPanel({
     } finally {
       setInputSource("text");
       abortRef.current = null;
+      sendLockRef.current = false;
       setIsSending(false);
     }
   }
@@ -432,7 +440,7 @@ export function ChatPanel({
           </div>
         </div>
 
-        <div className="chat-message-area dm-message-area heather-scrollbar">
+        <div ref={messageAreaRef} className="chat-message-area dm-message-area heather-scrollbar">
           {activeConversation?.messages.length ? (
             <div className="dm-thread">
               {activeConversation.messages.map((message) => (
@@ -469,7 +477,6 @@ export function ChatPanel({
             </div>
           )}
           {(isSending || progressEvents.length) ? <ThinkingStatusPanel events={progressEvents} isRunning={isSending} locale={settings.defaultLanguage} onCancel={handleStopResponse} /> : null}
-          <div ref={messagesEndRef} />
         </div>
 
         <div className="chat-composer-wrap">

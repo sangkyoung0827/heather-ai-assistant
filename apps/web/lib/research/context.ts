@@ -38,7 +38,7 @@ export function buildResearchContext(payload: ChatRequestPayload): {
   return {
     context,
     evidence,
-    messages: buildLlmMessages(payload, `${HEATHER_RESEARCH_SYSTEM_PROMPT}${memoryContext}`)
+    messages: buildLlmMessages(compactResearchPayload(payload), `${HEATHER_RESEARCH_SYSTEM_PROMPT}${memoryContext}`)
   };
 }
 
@@ -53,11 +53,25 @@ function findRelevantResearchMemories(message: string, memories: MemoryRecord[])
     })
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 5)
+    .slice(0, 3)
     .map(({ memory }) => ({
       id: memory.id,
       source: memory.source.slice(0, 160),
-      content: memory.content.slice(0, 1600),
+      content: memory.content.slice(0, 700),
       tags: memory.tags.slice(0, 12)
     }));
+}
+
+function compactResearchPayload(payload: ChatRequestPayload): ChatRequestPayload {
+  if (!payload.conversation) return payload;
+  return {
+    ...payload,
+    conversation: {
+      ...payload.conversation,
+      messages: payload.conversation.messages.slice(-4).map((message) => ({
+        ...message,
+        content: message.content.slice(0, 700)
+      }))
+    }
+  };
 }
