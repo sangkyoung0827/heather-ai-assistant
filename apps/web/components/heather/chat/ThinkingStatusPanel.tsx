@@ -41,7 +41,7 @@ export function ToolStatusSummary({ events, locale }: { events: ChatProgressEven
   return <div className="tool-status-summary" aria-label={locale === "ko" ? "연구 도구 상태" : "Research tool status"}>
     {providers.map(([provider, event]) => <span key={provider} className={`is-${event.provider_status || event.status}`}>{providerLabel(provider)} · {providerStatusLabel(event, locale)}</span>)}
     {sourceCount ? <small>{locale === "ko" ? `확인 출처 ${sourceCount}건` : `${sourceCount} sources checked`}</small> : null}
-    {verifiedCount ? <small>{locale === "ko" ? `DOI 확인 ${verifiedCount}건` : `${verifiedCount} DOI verified`}</small> : null}
+    {verifiedCount ? <small>{locale === "ko" ? `DOI 식별 ${verifiedCount}건` : `${verifiedCount} DOI identifiers`}</small> : null}
     {abstractCount ? <small>{locale === "ko" ? `초록 검토 ${abstractCount}건` : `${abstractCount} abstracts reviewed`}</small> : null}
   </div>;
 }
