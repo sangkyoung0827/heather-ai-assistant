@@ -1,4 +1,4 @@
-const serviceWorker = `const CACHE_NAME = "heather-ai-assistant-v2";
+const serviceWorker = `const CACHE_NAME = "heather-ai-assistant-v3";
 const SHELL_ASSETS = ["/", "/manifest.webmanifest", "/icons/heather-icon.svg"];
 
 self.addEventListener("install", (event) => {
