@@ -10,7 +10,7 @@ import {
 } from "@heather/core";
 
 type JsonRecord = Record<string, unknown>;
-type ContextClient = { client: SupabaseClient; user: User };
+export type ContextClient = { client: SupabaseClient; user: User };
 
 const SEED_FILES: Array<{ file: string; itemType: "identity" | "preference" | "project" | "operational" | "sensitive" | "project_registry" }> = [
   { file: "user-profile.ko.json", itemType: "identity" },

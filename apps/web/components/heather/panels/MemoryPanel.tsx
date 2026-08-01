@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Search, Trash2, X } from "lucide-react";
 import { createId, nowIso } from "@heather/core";
 import type { HeatherLanguage, MemoryRecord } from "@heather/core";
 import { DocumentIngestionPanel } from "./DocumentIngestionPanel";
+import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
+import { PersonalMemoryScopeBar } from "./PersonalMemoryScopeBar";
+import type { PersonalMemoryScope, PersonalMemoryScopeCounts } from "../../../lib/personal-memory-scope/server";
 
 interface MemoryPanelProps {
   variant?: "personal" | "research";
@@ -16,6 +19,7 @@ interface MemoryPanelProps {
 }
 
 const PAGE_SIZE = 30;
+type PersonalScopeResponse = { counts: PersonalMemoryScopeCounts; records: MemoryRecord[]; searchCount: number };
 
 export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemory, onDeleteMemory, auth }: MemoryPanelProps) {
   const isResearch = variant === "research";
@@ -30,6 +34,9 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "editor">("list");
+  const [scope, setScope] = useState<PersonalMemoryScope>("all");
+  const [scopeData, setScopeData] = useState<PersonalScopeResponse | null>(null);
+  const [scopeError, setScopeError] = useState("");
 
   useEffect(() => {
     if (locale) { setResolvedLocale(locale); return; }
@@ -40,7 +47,8 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
     } catch { setResolvedLocale("ko"); }
   }, [locale]);
 
-  const scopedMemories = useMemo(() => memories.filter((memory) => inScope(memory, variant) && !memory.archived), [memories, variant]);
+  const localScopedMemories = useMemo(() => memories.filter((memory) => inScope(memory, variant) && !memory.archived), [memories, variant]);
+  const scopedMemories = useMemo(() => !isResearch && scopeData ? scopeData.records : localScopedMemories, [isResearch, localScopedMemories, scopeData]);
   const filteredMemories = useMemo(() => {
     const query = appliedQuery.trim().toLocaleLowerCase();
     if (!query) return scopedMemories;
@@ -51,10 +59,32 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search).get("q") || "";
-    setDraftQuery(query); setAppliedQuery(query);
+    const initialScope = parsePersonalMemoryScope(new URLSearchParams(window.location.search).get("scope"));
+    setDraftQuery(query); setAppliedQuery(query); setScope(initialScope);
   }, []);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [appliedQuery]);
+  const loadPersonalScope = useCallback(async () => {
+    if (isResearch || !auth?.user) return;
+    try {
+      const session = await getSupabaseBrowserClient()?.auth.getSession();
+      const token = session?.data.session?.access_token;
+      if (!token) return;
+      setScopeError("");
+      const params = new URLSearchParams({ scope });
+      if (appliedQuery.trim()) params.set("q", appliedQuery.trim());
+      const response = await fetch(`/api/memory/personal-scope?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+      const data = await response.json() as PersonalScopeResponse & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Could not load personal memory scope.");
+      setScopeData(data);
+    } catch (reason) {
+      setScopeData(null);
+      setScopeError(reason instanceof Error ? reason.message : "Could not load personal memory scope.");
+    }
+  }, [appliedQuery, auth?.user, isResearch, scope]);
+
+  useEffect(() => { void loadPersonalScope(); }, [loadPersonalScope]);
+
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [appliedQuery, scope]);
 
   useEffect(() => {
     if (!selected) return;
@@ -65,8 +95,17 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
     const next = draftQuery.trim();
     setAppliedQuery(next);
     const params = new URLSearchParams(window.location.search);
+    params.set("scope", scope);
     if (next) params.set("q", next); else params.delete("q");
     window.history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params.toString()}` : ""}`);
+  }
+
+  function changeScope(nextScope: PersonalMemoryScope) {
+    if (nextScope === scope) return;
+    setScope(nextScope); setSelectedId(null); setContent("");
+    const params = new URLSearchParams(window.location.search);
+    params.set("scope", nextScope);
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
   }
 
   function startNewMemory() {
@@ -79,7 +118,7 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
 
   async function save() {
     const value = content.trim();
-    if (!value || saving) return;
+    if (!value || saving || isReadOnlySelected) return;
     setSaving(true); setError("");
     try {
       const timestamp = nowIso();
@@ -89,17 +128,19 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
         : { id: createId("memory"), content: value, created_at: timestamp, updated_at: timestamp, archived: false, confidence: .72, ...generated };
       await onSaveMemory(memory);
       setSelectedId(memory.id); setContent(memory.content);
+      await loadPersonalScope();
     } catch {
       setError(copy.saveFailed);
     } finally { setSaving(false); }
   }
 
   async function remove() {
-    if (!selected || saving) return;
+    if (!selected || saving || isReadOnlySelected) return;
     setSaving(true); setError("");
     try {
       await onDeleteMemory(selected.id);
       setSelectedId(null); setContent(""); setConfirmDelete(false); setMobileView("list");
+      await loadPersonalScope();
     } catch {
       setError(copy.deleteFailed);
     } finally { setSaving(false); }
@@ -108,20 +149,24 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
   if (auth && !auth.ready) return <section className="memory-auth-gate"><div><p>로그인 상태를 확인하는 중입니다.</p></div></section>;
   if (auth && !auth.user) return <MemoryAuthGate copy={copy} auth={auth} />;
 
+  const isReadOnlySelected = !isResearch && Boolean(selected && selected.source !== "personal");
+  const visibleTotal = !isResearch && scopeData ? scopeData.counts[scope] : scopedMemories.length;
+
   return <div className={`memory-workspace simple-memory-workspace ${mobileView === "editor" ? "is-mobile-editor" : "is-mobile-list"}`}>
     <aside className="memory-browser simple-memory-list">
-      <header className="simple-memory-list-header"><div><h2>{copy.title}</h2><p>{countLabel(scopedMemories.length, resolvedLocale)}</p></div>{auth?.user ? <button type="button" className="memory-sign-out" onClick={() => void auth.signOut()}>{copy.signOut}</button> : null}</header>
+      <header className="simple-memory-list-header"><div><h2>{copy.title}</h2><p>{countLabel(visibleTotal, resolvedLocale)}</p></div>{auth?.user ? <button type="button" className="memory-sign-out" onClick={() => void auth.signOut()}>{copy.signOut}</button> : null}</header>
       <form className="simple-memory-search" onSubmit={(event) => { event.preventDefault(); applySearch(); }}><Search /><input value={draftQuery} onChange={(event) => setDraftQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /><button type="submit" className="sr-only">{copy.search}</button></form>
+      {!isResearch ? <><PersonalMemoryScopeBar scope={scope} counts={scopeData?.counts || null} locale={resolvedLocale} onChange={changeScope} />{appliedQuery && scopeData ? <p className="personal-memory-search-result-count">{searchResultLabel(scopeData.searchCount, resolvedLocale)}</p> : null}{scopeError ? <p className="personal-memory-scope-error" role="status">{scopeError}</p> : null}</> : null}
       <div className="memory-list heather-scrollbar simple-memory-items">
         {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}><span className="simple-memory-content">{memory.content}</span><time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
         {renderedMemories.length < filteredMemories.length ? <button type="button" className="simple-memory-more" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)}>{copy.loadMore}</button> : null}
       </div>
     </aside>
     <section className="memory-editor simple-memory-editor">
-      {!isResearch ? <DocumentIngestionPanel scope="personal" locale={resolvedLocale} /> : null}
-      <header className="simple-memory-editor-header"><button type="button" className="simple-memory-back" onClick={() => setMobileView("list")} aria-label={copy.back}><ArrowLeft /></button><div><h2>{selected ? copy.edit : copy.newMemory}</h2><p>{copy.editorHint}</p></div><button type="button" className="simple-memory-new" onClick={startNewMemory} aria-label={copy.newMemory} title={copy.newMemory}>+</button></header>
-      <label className="simple-memory-field"><span>{copy.content}</span><textarea value={content} maxLength={isResearch ? 20000 : 10000} onChange={(event) => setContent(event.target.value)} placeholder={copy.placeholder} /></label>
-      <div className="simple-memory-editor-footer"><small>{content.length.toLocaleString()} / {(isResearch ? 20000 : 10000).toLocaleString()}</small><div>{selected ? <button type="button" className="simple-memory-delete" disabled={saving} onClick={() => setConfirmDelete(true)}><Trash2 />{copy.delete}</button> : null}<button type="button" className="simple-memory-save" disabled={!content.trim() || saving} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : null}{saving ? copy.saving : copy.save}</button></div></div>
+      {!isResearch ? <DocumentIngestionPanel scope="personal" locale={resolvedLocale} onRecordsChanged={loadPersonalScope} /> : null}
+      <header className="simple-memory-editor-header"><button type="button" className="simple-memory-back" onClick={() => setMobileView("list")} aria-label={copy.back}><ArrowLeft /></button><div><h2>{selected ? copy.edit : copy.newMemory}</h2><p>{isReadOnlySelected ? (resolvedLocale === "en" ? "This source record is read-only." : "이 원본 기록은 읽기 전용입니다.") : copy.editorHint}</p></div><button type="button" className="simple-memory-new" onClick={startNewMemory} aria-label={copy.newMemory} title={copy.newMemory}>+</button></header>
+      <label className="simple-memory-field"><span>{copy.content}</span><textarea value={content} readOnly={isReadOnlySelected} maxLength={isResearch ? 20000 : 10000} onChange={(event) => setContent(event.target.value)} placeholder={copy.placeholder} /></label>
+      <div className="simple-memory-editor-footer"><small>{content.length.toLocaleString()} / {(isResearch ? 20000 : 10000).toLocaleString()}</small><div>{selected && !isReadOnlySelected ? <button type="button" className="simple-memory-delete" disabled={saving} onClick={() => setConfirmDelete(true)}><Trash2 />{copy.delete}</button> : null}{!isReadOnlySelected ? <button type="button" className="simple-memory-save" disabled={!content.trim() || saving} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : null}{saving ? copy.saving : copy.save}</button> : null}</div></div>
       {error ? <p className="simple-memory-error" role="alert">{error}</p> : null}
     </section>
     {confirmDelete && selected ? <DeleteDialog copy={copy} onCancel={() => setConfirmDelete(false)} onDelete={() => void remove()} loading={saving} /> : null}
@@ -137,6 +182,8 @@ function inScope(memory: MemoryRecord, variant: "personal" | "research") { retur
 function searchableMemory(memory: MemoryRecord) { return `${memory.content} ${memory.source} ${memory.tags.join(" ")} ${memory.type}`.toLocaleLowerCase(); }
 function formatDate(value: string, locale: HeatherLanguage) { return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "ko-KR", { year: "numeric", month: "numeric", day: "numeric" }).format(new Date(value)); }
 function countLabel(count: number, locale: HeatherLanguage) { return locale === "en" ? `${count} ${count === 1 ? "memory" : "memories"}` : `${count}개`; }
+function searchResultLabel(count: number, locale: HeatherLanguage) { return locale === "en" ? `${count} search result${count === 1 ? "" : "s"}` : `검색 결과 ${count}건`; }
+function parsePersonalMemoryScope(value: string | null): PersonalMemoryScope { return value === "journal" || value === "direct" || value === "project" ? value : "all"; }
 
 function buildMemoryMetadata(content: string, variant: "personal" | "research"): Pick<MemoryRecord, "type" | "source" | "tags"> {
   const words = content.match(/[A-Za-z0-9가-힣]{2,}/g) || [];

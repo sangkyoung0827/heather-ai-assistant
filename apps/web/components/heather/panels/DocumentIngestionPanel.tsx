@@ -11,7 +11,7 @@ type Candidate = { id: string; document_id: string; title: string; content: stri
 
 const ACCEPT = ".txt,.md,.pdf,.docx,.hwpx,.hwp,.rtf,.odt,.csv,.xlsx,.pptx,.jpg,.jpeg,.png,.webp,.heic,.m4a,.mp3,.wav";
 
-export function DocumentIngestionPanel({ scope, locale }: { scope: Scope; locale: HeatherLanguage }) {
+export function DocumentIngestionPanel({ scope, locale, onRecordsChanged }: { scope: Scope; locale: HeatherLanguage; onRecordsChanged?: () => void }) {
   const korean = locale !== "en";
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -62,7 +62,7 @@ export function DocumentIngestionPanel({ scope, locale }: { scope: Scope; locale
       const response = await fetch("/api/documents", { method: "POST", headers: await headers(), body: form });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || copy.uploadFailed);
-      setFiles([]); if (inputRef.current) inputRef.current.value = ""; await load();
+      setFiles([]); if (inputRef.current) inputRef.current.value = ""; await load(); onRecordsChanged?.();
     } catch (reason) { setError(reason instanceof Error ? reason.message : copy.uploadFailed); }
     finally { setUploading(false); }
   }
@@ -72,12 +72,12 @@ export function DocumentIngestionPanel({ scope, locale }: { scope: Scope; locale
       const response = await fetch(`/api/documents/${documentId}/candidates/${candidateId}`, { method: "PATCH", headers: { ...(await headers()), "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || copy.actionFailed);
-      await load();
+      await load(); onRecordsChanged?.();
     } catch (reason) { setError(reason instanceof Error ? reason.message : copy.actionFailed); }
   }
   async function remove(documentId: string) {
     if (!window.confirm(copy.confirmDelete)) return;
-    try { const response = await fetch(`/api/documents/${documentId}`, { method: "DELETE", headers: await headers() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || copy.deleteFailed); } await load(); }
+    try { const response = await fetch(`/api/documents/${documentId}`, { method: "DELETE", headers: await headers() }); if (!response.ok) { const data = await response.json() as { error?: string }; throw new Error(data.error || copy.deleteFailed); } await load(); onRecordsChanged?.(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : copy.deleteFailed); }
   }
 
