@@ -1,16 +1,14 @@
 "use client";
 
-import { Check, ChevronDown, ChevronUp, Square, TriangleAlert } from "lucide-react";
+import { BrainCircuit, CheckCircle2, ChevronDown, ChevronUp, Command, Database, FilePenLine, FolderKanban, Inbox, Search, ShieldCheck, Square, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { progressLabel, type ChatProgressEvent } from "../../../lib/chat/progress-events";
-import { HeatherOrbitalThinkingIndicator, type OrbitalState } from "./HeatherOrbitalThinkingIndicator";
 
 export function ThinkingStatusPanel({ events, isRunning, locale, onCancel, mode = "personal" }: { events: ChatProgressEvent[]; isRunning: boolean; locale: "ko" | "en"; onCancel: () => void; mode?: "personal" | "research" }) {
   const [expanded, setExpanded] = useState(true);
   useEffect(() => { setExpanded(isRunning); }, [isRunning]);
   const current = events.at(-1);
-  const visible = useMemo(() => events.filter((event, index) => event.status !== "skipped" && (event.status !== "active" || !events.slice(index + 1).some((next) => next.stage === event.stage))).slice(mode === "research" ? -10 : -4), [events, mode]);
-  const state = orbitalState(current);
+  const visible = useMemo(() => latestStepEvents(events), [events]);
   const currentLabel = current ? progressLabel(current.stage, locale) : locale === "ko" ? "요청을 준비하고 있습니다." : "Preparing your request.";
   const completed = events.filter((event) => event.status === "completed").length;
   const sourceCount = latestCount(events, "source_count");
@@ -22,10 +20,46 @@ export function ThinkingStatusPanel({ events, isRunning, locale, onCancel, mode 
       : locale === "ko" ? `${completed}개 처리 단계를 확인해 답변했습니다.` : `Completed ${completed} processing steps for this response.`;
 
   return <section className={`thinking-status-panel ${isRunning ? "is-running" : "is-compact"} is-${mode}`} role="status" aria-live="polite">
-    <HeatherOrbitalThinkingIndicator state={state} mode={mode} candidateCount={candidateCount || sourceCount || 0} />
-    <div className="thinking-status-copy"><strong>{summary}</strong><div className="thinking-progress-track" role="progressbar" aria-label={locale === "ko" ? "Heather 응답 진행 상태" : "Heather response progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={current?.progress || 0}><span style={{ width: `${current?.progress || 0}%` }} /></div>{mode === "research" ? <ToolStatusSummary events={events} locale={locale} /> : null}{expanded ? <ol>{visible.map((event) => <li key={event.id} className={`is-${event.status}`}>{event.status === "failed" || event.status === "warning" ? <TriangleAlert /> : event.status === "active" ? <span className="thinking-active-mark" aria-hidden="true" /> : <Check />}<span>{progressLabel(event.stage, locale)}{event.detail ? <small>{event.detail}</small> : null}</span></li>)}</ol> : null}</div>
+    <div className="thinking-status-copy"><strong>{summary}</strong><div className="thinking-progress-track" role="progressbar" aria-label={locale === "ko" ? "Heather 응답 진행 상태" : "Heather response progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={current?.progress || 0}><span style={{ width: `${current?.progress || 0}%` }} /></div>{mode === "research" ? <ToolStatusSummary events={events} locale={locale} /> : null}{expanded ? <ol>{visible.map((event) => <ActivityRow key={event.id} event={event} locale={locale} />)}</ol> : null}</div>
     <div className="thinking-status-actions">{isRunning ? <button type="button" onClick={onCancel} title={locale === "ko" ? "응답 중단" : "Stop response"} aria-label={locale === "ko" ? "응답 중단" : "Stop response"}><Square /></button> : <button type="button" onClick={() => setExpanded((open) => !open)} title={locale === "ko" ? "처리 과정 보기" : "Show processing steps"} aria-label={locale === "ko" ? "처리 과정 보기" : "Show processing steps"}>{expanded ? <ChevronUp /> : <ChevronDown />}</button>}</div>
   </section>;
+}
+
+function ActivityRow({ event, locale }: { event: ChatProgressEvent; locale: "ko" | "en" }) {
+  const Icon = activityIcon(event);
+  const status = event.status === "warning" || event.status === "failed" ? "warning" : event.status === "active" ? "active" : "completed";
+  return <li className={`is-${status}`}><span className="thinking-step-icon"><Icon /></span><span><b>{activityLabel(event, locale)}</b>{event.detail ? <small>{event.detail}</small> : null}</span>{status === "completed" ? <CheckCircle2 className="thinking-step-complete" aria-label={locale === "ko" ? "완료" : "Completed"} /> : null}</li>;
+}
+
+function latestStepEvents(events: ChatProgressEvent[]) {
+  const indices = new Map<ChatProgressEvent["stage"], number>();
+  events.forEach((event, index) => { if (event.status !== "skipped") indices.set(event.stage, index); });
+  return events.filter((event, index) => event.status !== "skipped" && indices.get(event.stage) === index);
+}
+
+function activityIcon(event: ChatProgressEvent) {
+  if (event.status === "warning" || event.status === "failed") return TriangleAlert;
+  if (event.stage === "request_received") return Inbox;
+  if (event.stage === "intent_analysis" || event.stage === "research_intent_analysis" || event.stage === "scope_definition") return BrainCircuit;
+  if (event.stage === "direct_command_check") return Command;
+  if (["personal_memory_search", "research_memory_search", "research_material_search", "experiment_context_load"].includes(event.stage)) return Database;
+  if (event.stage === "project_context_resolve") return FolderKanban;
+  if (["web_search_decision", "web_search", "source_validation", "query_generation", "provider_routing", "cache_check", "openalex_search", "crossref_search", "pubmed_search", "europe_pmc_search", "semantic_scholar_search", "unpaywall_check", "research_web_search", "production_literature_search"].includes(event.stage)) return Search;
+  if (["response_review", "metadata_normalization", "doi_validation", "deduplication", "abstract_verification", "full_text_availability_check", "source_relevance_scoring", "evidence_assessment", "contradiction_check", "limitation_analysis", "citation_assembly"].includes(event.stage)) return ShieldCheck;
+  if (event.stage === "completed") return CheckCircle2;
+  return FilePenLine;
+}
+
+function activityLabel(event: ChatProgressEvent, locale: "ko" | "en") {
+  if (event.status === "active") return progressLabel(event.stage, locale);
+  if (event.status === "warning" || event.status === "failed") return progressLabel(event.stage, locale);
+  const ko: Partial<Record<ChatProgressEvent["stage"], string>> = {
+    request_received: "요청 확인함", intent_analysis: "요청 목적 확인함", research_intent_analysis: "연구 요청 목적 확인함", scope_definition: "연구 범위 정리함", direct_command_check: "직접명령 확인함", personal_memory_search: "개인 메모리 조회함", research_memory_search: "연구 메모리 조회함", research_material_search: "연구자료 조회함", project_context_resolve: "프로젝트 정보 연결함", web_search_decision: "검색 필요 여부 확인함", web_search: "외부 자료 검색함", source_validation: "출처 확인함", query_generation: "학술 검색어 구성함", provider_routing: "검색 경로 선택함", cache_check: "기존 검색 결과 확인함", response_composition: "답변 작성함", research_synthesis: "연구 분석 작성함", response_review: "답변 검토함", citation_assembly: "출처 연결함", completed: "답변 준비 완료"
+  };
+  const en: Partial<Record<ChatProgressEvent["stage"], string>> = {
+    request_received: "Request checked", intent_analysis: "Request intent checked", research_intent_analysis: "Research intent checked", scope_definition: "Research scope organized", direct_command_check: "Saved commands checked", personal_memory_search: "Personal memory checked", research_memory_search: "Research memory checked", research_material_search: "Research material checked", project_context_resolve: "Project context connected", web_search_decision: "Search need checked", web_search: "External sources searched", source_validation: "Sources checked", query_generation: "Academic query prepared", provider_routing: "Search route selected", cache_check: "Existing results checked", response_composition: "Response drafted", research_synthesis: "Research analysis drafted", response_review: "Response reviewed", citation_assembly: "Sources linked", completed: "Response ready"
+  };
+  return (locale === "ko" ? ko : en)[event.stage] || progressLabel(event.stage, locale);
 }
 
 export function ToolStatusSummary({ events, locale }: { events: ChatProgressEvent[]; locale: "ko" | "en" }) {
@@ -44,22 +78,6 @@ export function ToolStatusSummary({ events, locale }: { events: ChatProgressEven
     {verifiedCount ? <small>{locale === "ko" ? `DOI 식별 ${verifiedCount}건` : `${verifiedCount} DOI identifiers`}</small> : null}
     {abstractCount ? <small>{locale === "ko" ? `초록 검토 ${abstractCount}건` : `${abstractCount} abstracts reviewed`}</small> : null}
   </div>;
-}
-
-function orbitalState(event?: ChatProgressEvent): OrbitalState {
-  if (!event) return "analyzing";
-  if (event.status === "failed") return "failed";
-  if (event.status === "warning") return "warning";
-  if (event.status === "cancelled") return "cancelled";
-  if (event.stage === "completed") return "completed";
-  if (["web_search", "source_validation", "openalex_search", "crossref_search", "pubmed_search", "europe_pmc_search", "semantic_scholar_search", "unpaywall_check", "research_web_search", "production_literature_search"].includes(event.stage)) return "searching";
-  if (["metadata_normalization", "doi_validation", "deduplication", "abstract_verification", "full_text_availability_check", "source_relevance_scoring", "evidence_assessment", "evidence_alignment"].includes(event.stage)) return "validating";
-  if (["paper_comparison", "contradiction_check", "previous_experiment_compare", "process_variable_analysis"].includes(event.stage)) return "comparing";
-  if (["research_synthesis", "citation_assembly", "limitation_analysis"].includes(event.stage)) return "synthesizing";
-  if (["research_material_candidate_prepare", "research_memory_candidate_prepare", "next_research_direction_prepare", "experiment_recommendation_prepare"].includes(event.stage)) return "candidate_preparation";
-  if (event.stage === "personal_memory_search" || event.stage === "research_memory_search" || event.stage === "research_material_search" || event.stage === "project_context_resolve" || event.stage === "experiment_context_load") return "connecting";
-  if (event.stage === "response_composition" || event.stage === "response_review") return "composing";
-  return "analyzing";
 }
 
 function latestCount(events: ChatProgressEvent[], field: "source_count" | "candidate_count" | "verified_count" | "abstract_checked_count") {
