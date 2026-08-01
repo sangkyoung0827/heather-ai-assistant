@@ -32,6 +32,7 @@ import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { ThinkingStatusPanel } from "../chat/ThinkingStatusPanel";
 import { readChatProgressStream, type ChatProgressEvent, type ChatStreamEvent } from "../../../lib/chat/progress-events";
+import { createExplicitPersonalMemory, dedupeConsecutiveUserMessages, isRecentDuplicateSubmission, type RecentSubmission } from "../../../lib/chat/outgoing-message";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -107,6 +108,7 @@ export function ChatPanel({
   const abortRef = useRef<AbortController | null>(null);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
   const sendLockRef = useRef(false);
+  const recentSubmissionRef = useRef<RecentSubmission | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposingRef = useRef(false);
 
@@ -126,6 +128,11 @@ export function ChatPanel({
       return haystack.includes(query);
     });
   }, [conversations, search]);
+
+  const visibleMessages = useMemo(
+    () => dedupeConsecutiveUserMessages(activeConversation?.messages || []),
+    [activeConversation?.messages]
+  );
 
   useEffect(() => {
     if (!activeConversationId && conversations[0]) {
@@ -162,9 +169,10 @@ export function ChatPanel({
 
   async function handleSend() {
     const message = (textareaRef.current?.value ?? draft).trim();
-    if (!message || isSending || sendLockRef.current) return;
+    if (!message || isSending || sendLockRef.current || isRecentDuplicateSubmission(message, recentSubmissionRef.current)) return;
 
     sendLockRef.current = true;
+    recentSubmissionRef.current = { fingerprint: message.trim().replace(/\s+/g, " ").toLocaleLowerCase(), submittedAt: Date.now() };
     setDraft("");
     setIsSending(true);
     setProviderStatus("응답 준비 중");
@@ -177,7 +185,7 @@ export function ChatPanel({
     const optimisticConversation: Conversation = {
       ...baseConversation,
       title: baseConversation.messages.length ? baseConversation.title : generateConversationTitle(message),
-      messages: [...baseConversation.messages, userMessage],
+      messages: [...dedupeConsecutiveUserMessages(baseConversation.messages), userMessage],
       updatedAt: nowIso()
     };
 
@@ -217,15 +225,22 @@ export function ChatPanel({
         await onSaveSettings(incrementPaidApiCount(settings));
       }
 
-      if (data.memorySuggestion && settings.memoryEnabled && !data.cached) {
-        const timestamp = nowIso();
-        await onSaveMemory({
-          ...data.memorySuggestion,
-          id: createId("memory"),
-          created_at: timestamp,
-          updated_at: timestamp,
-          archived: false
-        });
+      const memorySuggestion = data.memorySuggestion || createExplicitPersonalMemory(message);
+      const memoryAlreadyExists = memorySuggestion && memories.some((memory) => !memory.archived && memory.content === memorySuggestion.content);
+      if (memorySuggestion && settings.memoryEnabled && !memoryAlreadyExists) {
+        try {
+          const timestamp = nowIso();
+          await onSaveMemory({
+            ...memorySuggestion,
+            id: createId("memory"),
+            created_at: timestamp,
+            updated_at: timestamp,
+            archived: false
+          });
+          if (memorySuggestion.source === "chat-explicit") setProviderStatus("개인 메모리에 저장했습니다.");
+        } catch {
+          if (memorySuggestion.source === "chat-explicit") setProviderStatus("답변은 완료됐지만 개인 메모리는 저장하지 못했습니다. 로그인 상태를 확인하세요.");
+        }
       }
 
       if (settings.voiceOutputEnabled) {
@@ -441,9 +456,9 @@ export function ChatPanel({
         </div>
 
         <div ref={messageAreaRef} className="chat-message-area dm-message-area heather-scrollbar">
-          {activeConversation?.messages.length ? (
+          {visibleMessages.length ? (
             <div className="dm-thread">
-              {activeConversation.messages.map((message) => (
+              {visibleMessages.map((message) => (
                 <article
                   key={message.id}
                   className={`dm-message-row ${message.role === "user" ? "is-user" : "is-heather"}`}
