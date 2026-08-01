@@ -2,6 +2,8 @@ import { HEATHER_GENERAL_SYSTEM_PROMPT, HEATHER_RESEARCH_SYSTEM_PROMPT } from ".
 import type { HeatherModelRole, ModelProfile } from "./types";
 
 const DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+export const NVIDIA_GENERAL_MODEL = "deepseek-ai/deepseek-v4-flash";
+export const NVIDIA_RESEARCH_MODEL = "nvidia/nvidia-nemotron-nano-9b-v2";
 
 export interface LlmConfig {
   provider: string;
@@ -52,9 +54,9 @@ export function isNvidiaConfigured(config = getLlmConfig()): boolean {
 export function resolveModelProfile(role: HeatherModelRole, config = getLlmConfig()): ModelProfile {
   const legacyFallback = process.env.NVIDIA_MODEL_FALLBACK?.trim() || config.model;
   const modelId = role === "general"
-    ? process.env.NVIDIA_MODEL_GENERAL?.trim() || legacyFallback
+    ? NVIDIA_GENERAL_MODEL
     : role === "research"
-      ? process.env.NVIDIA_MODEL_RESEARCH?.trim() || legacyFallback
+      ? NVIDIA_RESEARCH_MODEL
       : legacyFallback;
   const isResearch = role === "research";
 
