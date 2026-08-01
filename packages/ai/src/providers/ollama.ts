@@ -36,6 +36,7 @@ interface OllamaGenerateResponse {
 }
 
 function compactContext(payload: ChatRequestPayload): string {
+  const hasDocumentExcerpt = payload.memories.some((memory) => !memory.archived && memory.tags.includes("document"));
   const memories = payload.memories
     .filter((memory) => !memory.archived)
     .slice(0, 6)
@@ -60,7 +61,9 @@ function compactContext(payload: ChatRequestPayload): string {
   return [
     "로컬 장기 기억:",
     memories || "- 없음",
-    "업로드 문서 발췌가 제공된 경우에만 그 원문을 근거로 답한다. 발췌에 없는 내용은 파일에서 읽었다고 추측하지 않는다.",
+    hasDocumentExcerpt
+      ? "이 요청에는 개인 메모리에서 조회한 업로드 문서 원문 발췌가 제공되어 있다. 해당 발췌를 실제로 읽고 분석해야 하며, 개인 메모리에 접근할 수 없다고 말하지 않는다. 발췌에 없는 내용은 파일에서 읽었다고 추측하지 않는다."
+      : "업로드 문서 발췌가 제공된 경우에만 그 원문을 근거로 답한다. 발췌에 없는 내용은 파일에서 읽었다고 추측하지 않는다.",
     "",
     "프로젝트:",
     projects || "- 없음",

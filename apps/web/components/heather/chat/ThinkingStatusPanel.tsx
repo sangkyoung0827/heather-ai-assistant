@@ -28,7 +28,7 @@ export function ThinkingStatusPanel({ events, isRunning, locale, onCancel, mode 
 function ActivityRow({ event, locale }: { event: ChatProgressEvent; locale: "ko" | "en" }) {
   const Icon = activityIcon(event);
   const status = event.status === "warning" || event.status === "failed" ? "warning" : event.status === "active" ? "active" : "completed";
-  return <li className={`is-${status}`}><span className="thinking-step-icon"><Icon /></span><span><b>{activityLabel(event, locale)}</b>{event.detail ? <small>{event.detail}</small> : null}</span>{status === "completed" ? <CheckCircle2 className="thinking-step-complete" aria-label={locale === "ko" ? "완료" : "Completed"} /> : null}</li>;
+  return <li className={`is-${status}`}><span className="thinking-step-icon"><Icon /></span><span><b>{activityLabel(event, locale)}</b>{event.detail || event.source_name ? <small>{event.detail || event.source_name}</small> : null}</span>{status === "completed" ? <CheckCircle2 className="thinking-step-complete" aria-label={locale === "ko" ? "완료" : "Completed"} /> : null}</li>;
 }
 
 function latestStepEvents(events: ChatProgressEvent[]) {

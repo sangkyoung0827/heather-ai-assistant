@@ -309,7 +309,7 @@ export function ChatPanel({
   }
 
   async function resolveHeatherResponse(payload: ChatRequestPayload, onEvent: (event: ChatStreamEvent) => void, signal: AbortSignal): Promise<ApiChatResponse> {
-    const cachedResponse = payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) ? readCachedResponse(payload) : null;
+    const cachedResponse = payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) ? readCachedResponse(payload) : null;
     if (cachedResponse) {
       onEvent({ type: "progress", data: createClientProgressEvent("request_received", "completed", 10) });
       onEvent({ type: "progress", data: createClientProgressEvent("response_composition", "completed", 92, "cache") });
@@ -349,7 +349,7 @@ export function ChatPanel({
     if (streamError || !message) throw new Error(streamError || "Heather chat request failed.");
     const data: ApiChatResponse = { message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Text response." }, provider, model, cached: wasCached };
 
-    if (payload.settings.cacheResponses && !isQuickLinkCommand(payload.message)) {
+    if (payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message)) {
       writeCachedResponse(payload, data);
     }
 
@@ -716,6 +716,10 @@ function isQuickLinkCommand(message: string) {
   const action = /등록|추가|삭제|지워|제거|옮겨|이동|주소.*(?:바꿔|변경|수정)|링크.*(?:바꿔|변경|수정)|\b(add|register|delete|remove|move|update|rename|change)\b/i.test(message);
   const target = /https?:\/\/|사이트|링크|업무|프로젝트|콘텐츠|유튜브|음악|\b(quick\s*access|quick\s*link|website|link|work|project|content)\b/i.test(message);
   return action && target;
+}
+
+function isPersonalMemoryRequest(message: string) {
+  return /\b(my (?:document|file|journal|diary)|uploaded (?:document|file))\b|개인\s*메모리|내\s*(?:파일|문서|일기)|업로드(?:한|한\s*파일|한\s*문서)|일기(?:를|의|파일)?/.test(message.toLocaleLowerCase());
 }
 
 function hashString(value: string): string {

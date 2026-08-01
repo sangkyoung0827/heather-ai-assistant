@@ -28,7 +28,7 @@ interface CachedChatResponse extends ChatResponsePayload {
 }
 
 type ResolvedChat = { response: CachedChatResponse; usedTools: string[] };
-type ProgressReporter = (stage: ChatProgressStage, status: ChatProgressStatus, progress: number, source?: { type?: ChatProgressEvent["source_type"]; name?: string }) => void;
+type ProgressReporter = (stage: ChatProgressStage, status: ChatProgressStatus, progress: number, source?: { type?: ChatProgressEvent["source_type"]; name?: string; detail?: string }) => void;
 
 declare global {
   // eslint-disable-next-line no-var
@@ -73,6 +73,7 @@ function createProgressStream(request: Request, receivedPayload: ChatRequestPayl
           progress,
           source_type: source?.type,
           source_name: source?.name,
+          detail: source?.detail,
           started_at: new Date(started).toISOString(),
           completed_at: status === "active" ? undefined : new Date(now).toISOString(),
           duration_ms: status === "active" ? undefined : now - started
@@ -109,6 +110,7 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   report?.("request_received", "completed", 8);
   report?.("intent_analysis", "active", 12);
   const intent = classifyIntent(receivedPayload.message);
+  const personalDocumentRequest = shouldSearchPersonalDocuments(receivedPayload.message);
   report?.("intent_analysis", "completed", 16);
 
   report?.("direct_command_check", "active", 20, { type: "direct_command" });
@@ -116,11 +118,11 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   let directMatch: Awaited<ReturnType<DirectCommandRepository["find"]>> = null;
   try {
     directMatch = await directCommands.find(receivedPayload.message);
-    report?.("direct_command_check", "completed", 24, { type: "direct_command", name: directMatch?.command.canonicalTrigger });
   } catch {
     report?.("direct_command_check", "warning", 24, { type: "direct_command" });
   }
-  if (directMatch) {
+  if (directMatch && !personalDocumentRequest) {
+    report?.("direct_command_check", "completed", 24, { type: "direct_command", name: directMatch.command.canonicalTrigger });
     usedTools.push("direct_command");
     await directCommands.incrementUsage(directMatch.command.id).catch(() => undefined);
     await directCommands.logIntent("direct_command", receivedPayload.message, directMatch.command.id).catch(() => undefined);
@@ -129,6 +131,9 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
       usedTools
     };
   }
+  report?.("direct_command_check", directMatch ? "skipped" : "completed", 24, directMatch
+    ? { type: "direct_command", detail: "개인 메모리 요청이므로 저장된 고정 응답 대신 원문을 조회합니다." }
+    : { type: "direct_command" });
 
   const quickLinkIntent = parseQuickLinkIntent(receivedPayload.message);
   if (quickLinkIntent) {
@@ -185,8 +190,8 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
     }
   }
 
-  if (intent.personal || intent.document || shouldSearchPersonalDocuments(payload.message)) {
-    report?.("personal_memory_search", "active", 30, { type: "personal_memory", name: "documents" });
+  if (intent.personal || intent.document || personalDocumentRequest) {
+    report?.("personal_memory_search", "active", 30, { type: "personal_memory", name: "documents", detail: "로그인한 계정의 개인 메모리와 업로드 파일을 조회하고 있습니다." });
     try {
       const documentMemories = await retrieveDocumentMemoryContext(await requireContextUser(request), "personal", payload.message);
       if (documentMemories.length) {
@@ -194,11 +199,12 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
         // receives the source material that was found for this request.
         payload = { ...payload, memories: [...documentMemories, ...payload.memories].slice(0, 12) };
         usedTools.push("document_context");
-        report?.("personal_memory_search", "completed", 38, { type: "personal_memory", name: `${documentMemories.length} document chunks` });
-      } else report?.("personal_memory_search", "skipped", 38, { type: "personal_memory" });
+        const sources = [...new Set(documentMemories.map((memory) => memory.source.replace(/^document:\s*/, "").split(" · ")[0]))].join(", ");
+        report?.("personal_memory_search", "completed", 38, { type: "personal_memory", name: `${documentMemories.length} document chunks`, detail: `${sources}에서 관련 원문 ${documentMemories.length}개를 읽어 답변에 반영합니다.` });
+      } else report?.("personal_memory_search", "skipped", 38, { type: "personal_memory", detail: "관련 원문을 찾지 못했습니다. 원문이 없는 상태에서 내용을 추측하지 않습니다." });
     } catch {
       // Chat remains available if a user is signed out or document storage is unavailable.
-      report?.("personal_memory_search", "skipped", 38, { type: "personal_memory" });
+      report?.("personal_memory_search", "warning", 38, { type: "personal_memory", detail: "개인 메모리 조회를 완료하지 못했습니다. 원문 없이 추측하지 않고 답변을 준비합니다." });
     }
   }
 
