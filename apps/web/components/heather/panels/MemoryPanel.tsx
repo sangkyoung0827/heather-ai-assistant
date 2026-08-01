@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Search, Trash2, X } from "lucide-react";
 import { createId, nowIso } from "@heather/core";
 import type { HeatherLanguage, MemoryRecord } from "@heather/core";
+import { DocumentIngestionPanel } from "./DocumentIngestionPanel";
 
 interface MemoryPanelProps {
   variant?: "personal" | "research";
@@ -117,6 +118,7 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
       </div>
     </aside>
     <section className="memory-editor simple-memory-editor">
+      {!isResearch ? <DocumentIngestionPanel scope="personal" locale={resolvedLocale} /> : null}
       <header className="simple-memory-editor-header"><button type="button" className="simple-memory-back" onClick={() => setMobileView("list")} aria-label={copy.back}><ArrowLeft /></button><div><h2>{selected ? copy.edit : copy.newMemory}</h2><p>{copy.editorHint}</p></div><button type="button" className="simple-memory-new" onClick={startNewMemory} aria-label={copy.newMemory} title={copy.newMemory}>+</button></header>
       <label className="simple-memory-field"><span>{copy.content}</span><textarea value={content} maxLength={isResearch ? 20000 : 10000} onChange={(event) => setContent(event.target.value)} placeholder={copy.placeholder} /></label>
       <div className="simple-memory-editor-footer"><small>{content.length.toLocaleString()} / {(isResearch ? 20000 : 10000).toLocaleString()}</small><div>{selected ? <button type="button" className="simple-memory-delete" disabled={saving} onClick={() => setConfirmDelete(true)}><Trash2 />{copy.delete}</button> : null}<button type="button" className="simple-memory-save" disabled={!content.trim() || saving} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : null}{saving ? copy.saving : copy.save}</button></div></div>

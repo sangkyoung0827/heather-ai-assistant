@@ -12,6 +12,8 @@ import { runMatchedSkill, type RuntimeSkillProgress, type RuntimeSource } from "
 import { DirectCommandRepository } from "../../../../lib/intent/direct-command-repository";
 import { externalDiscoveryUnavailableMessage, formatResearchResponse, verifiedResearchSources, type ResearchSourceReference } from "../../../../lib/research/response";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent, type HeatherProgressStage } from "../../../../lib/chat/progress-events";
+import { requireContextUser } from "../../../../lib/context-control/server";
+import { retrieveDocumentMemoryContext } from "../../../../lib/documents/server";
 
 export const runtime = "nodejs";
 
@@ -111,11 +113,16 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
     emit?.("scope_definition", "active", { source_type: "research_analysis" });
     emit?.("scope_definition", "completed", { source_type: "research_analysis" });
 
-    const { evidence, messages } = buildResearchContext(payload);
-    if (payload.memories.some((memory) => !memory.archived && (memory.type === "project_context" || memory.source.startsWith("research")))) {
-      emit?.("research_memory_search", "active", { source_type: "research_memory" });
-      emit?.("research_memory_search", "completed", { source_type: "research_memory", source_count: evidence.length, detail: evidence.length ? undefined : "관련된 저장 연구 메모리가 없습니다." });
+    let enrichedPayload = payload;
+    emit?.("research_memory_search", "active", { source_type: "research_memory" });
+    try {
+      const documentMemories = await retrieveDocumentMemoryContext(await requireContextUser(request), "research", payload.message);
+      if (documentMemories.length) enrichedPayload = { ...payload, memories: [...payload.memories, ...documentMemories] };
+      emit?.("research_memory_search", documentMemories.length ? "completed" : "skipped", { source_type: "research_memory", source_count: documentMemories.length, detail: documentMemories.length ? "업로드된 연구자료의 관련 구간을 확인했습니다." : "검색 허용된 관련 연구자료가 없습니다." });
+    } catch {
+      emit?.("research_memory_search", "skipped", { source_type: "research_memory", detail: "업로드 연구자료를 사용할 수 없습니다." });
     }
+    const { evidence, messages } = buildResearchContext(enrichedPayload);
 
     emit?.("direct_command_check", "active", { source_type: "direct_command" });
     const directCommands = new DirectCommandRepository();
@@ -131,7 +138,7 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
     }
 
     const runtimePlan = createResearchPlan(payload.message, {
-      hasResearchMemories: payload.memories.some((memory) => !memory.archived && (memory.type === "project_context" || memory.source.startsWith("research"))),
+      hasResearchMemories: enrichedPayload.memories.some((memory) => !memory.archived && (memory.type === "project_context" || memory.source.startsWith("research"))),
       hasRelevantProject: relevantProject !== null
     });
     const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null;

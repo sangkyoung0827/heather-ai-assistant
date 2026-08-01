@@ -11,7 +11,8 @@ import { runAgentSearch, type SearchSource } from "../../../lib/agent-runtime-se
 import { resolveModelProfile } from "../../../lib/llm/config";
 import { buildLlmMessages } from "../../../lib/llm/messages";
 import { generateForModelRole } from "../../../lib/llm/service";
-import { enrichChatPayloadFromContext } from "../../../lib/context-control/server";
+import { enrichChatPayloadFromContext, requireContextUser } from "../../../lib/context-control/server";
+import { retrieveDocumentMemoryContext } from "../../../lib/documents/server";
 import { DirectCommandRepository } from "../../../lib/intent/direct-command-repository";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 
@@ -140,6 +141,21 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
     }
   }
 
+  if (intent.personal || intent.document) {
+    report?.("personal_memory_search", "active", 30, { type: "personal_memory", name: "documents" });
+    try {
+      const documentMemories = await retrieveDocumentMemoryContext(await requireContextUser(request), "personal", payload.message);
+      if (documentMemories.length) {
+        payload = { ...payload, memories: [...payload.memories, ...documentMemories] };
+        usedTools.push("document_context");
+        report?.("personal_memory_search", "completed", 38, { type: "personal_memory", name: `${documentMemories.length} document chunks` });
+      } else report?.("personal_memory_search", "skipped", 38, { type: "personal_memory" });
+    } catch {
+      // Chat remains available if a user is signed out or document storage is unavailable.
+      report?.("personal_memory_search", "skipped", 38, { type: "personal_memory" });
+    }
+  }
+
   if (intent.project) {
     report?.("project_context_resolve", "active", 44, { type: "project_context" });
     const enriched = await enrichChatPayloadFromContext(request, payload);
@@ -209,6 +225,7 @@ function classifyIntent(message: string) {
   const normalized = message.trim().toLowerCase();
   return {
     personal: /\b(i|my|me|prefer|preference|remember|memory|style)\b|내가|나의|내\s|선호|기억|평소|스타일|전에/.test(normalized),
+    document: /\b(document|file|journal|diary|upload|paper)\b|문서|파일|일기|기록|업로드|논문/.test(normalized),
     project: /\b(project|status|progress|current state|xudy)\b|프로젝트|진행|현황|상태|현재|자이디|주디|xudy/i.test(normalized),
     currentInfo: /\b(search|find|latest|news|current|today|202[0-9])\b|검색|찾아|최신|최근|뉴스|공고|오늘|현재|[0-9]{4}년/.test(normalized)
   };
