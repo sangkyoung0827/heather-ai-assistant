@@ -10,7 +10,7 @@ import { createResearchPlan, providerStage } from "../../../../lib/research/prog
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
 import { runMatchedSkill, type RuntimeSkillProgress, type RuntimeSource } from "../../../../lib/skills/agent-runtime";
 import { DirectCommandRepository } from "../../../../lib/intent/direct-command-repository";
-import { formatResearchResponse, type ResearchSourceReference } from "../../../../lib/research/response";
+import { externalDiscoveryUnavailableMessage, formatResearchResponse, verifiedResearchSources, type ResearchSourceReference } from "../../../../lib/research/response";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent, type HeatherProgressStage } from "../../../../lib/chat/progress-events";
 
 export const runtime = "nodejs";
@@ -138,15 +138,30 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
     const skill = runtimePlan.usesExternalDiscovery
       ? await runMatchedSkill(payload.message, payload.settings.defaultLanguage, accessToken, "research", (progress) => emitRuntimeProgress(emit, progress), request.signal)
       : null;
+    const verifiedSources = verifiedResearchSources(skill?.sources || []);
+    if (runtimePlan.usesExternalDiscovery && (!skill || !verifiedSources.length)) {
+      const message = externalDiscoveryUnavailableMessage(payload.settings.defaultLanguage, runtimePlan.academic);
+      emit?.("fallback", "warning", { source_type: "academic_search", detail: "실제 검색 출처를 확인하지 못했습니다. 출처 없는 논문과 DOI는 생성하지 않습니다." });
+      emit?.("response_review", "completed", { source_type: "academic_search" });
+      const assistant = await conversations.appendAssistant({
+        conversationId: turn.conversation.id,
+        content: message,
+        source: "skill",
+        replyTo: clientMessageId,
+        metadata: { provider: "agent-runtime", model: "research-discovery-unavailable", discovery_status: "no_verified_sources" }
+      });
+      return completedResponse(message, generateConversationTitle(payload.message), "agent-runtime", "research-discovery-unavailable", turn.conversation.id, turn.userMessage.id, assistant.id);
+    }
+
     if (skill) {
       emit?.("metadata_normalization", "active", { source_type: "academic_search" });
-      const sourceStats = summarizeSources(skill.sources || []);
+      const sourceStats = summarizeSources(verifiedSources);
       emit?.("metadata_normalization", "completed", { source_type: "academic_search", ...sourceStats });
       emit?.("deduplication", "completed", { source_type: "academic_search", source_count: sourceStats.source_count, candidate_count: sourceStats.candidate_count, duplicate_count: 0 });
       if (sourceStats.abstract_checked_count) emit?.("abstract_verification", "completed", { source_type: "academic_search", abstract_checked_count: sourceStats.abstract_checked_count, source_count: sourceStats.source_count });
       emit?.("source_relevance_scoring", "completed", { source_type: "academic_search", source_count: sourceStats.source_count, candidate_count: sourceStats.candidate_count });
       emit?.("research_synthesis", "active", { source_type: "research_analysis", source_count: sourceStats.source_count });
-      const message = formatResearchResponse(skill.message, skill.sources as ResearchSourceReference[] | undefined);
+      const message = formatResearchResponse(skill.message, verifiedSources as ResearchSourceReference[]);
       emit?.("research_synthesis", "completed", { source_type: "research_analysis", ...sourceStats });
       emit?.("citation_assembly", "completed", { source_type: "academic_search", ...sourceStats });
       emitCandidateStatus(emit, payload.message);
