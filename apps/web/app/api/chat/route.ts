@@ -191,7 +191,7 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   }
 
   if (intent.personal || intent.document || personalDocumentRequest) {
-    report?.("personal_memory_search", "active", 30, { type: "personal_memory", name: "documents", detail: "로그인한 계정의 개인 메모리와 업로드 파일을 조회하고 있습니다." });
+    report?.("personal_document_search", "active", 30, { type: "personal_memory", detail: "로그인한 계정의 업로드 파일 원문을 조회하고 있습니다." });
     try {
       const documentMemories = await retrieveDocumentMemoryContext(await requireContextUser(request), "personal", payload.message);
       if (documentMemories.length) {
@@ -200,11 +200,11 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
         payload = { ...payload, memories: [...documentMemories, ...payload.memories].slice(0, 12) };
         usedTools.push("document_context");
         const sources = [...new Set(documentMemories.map((memory) => memory.source.replace(/^document:\s*/, "").split(" · ")[0]))].join(", ");
-        report?.("personal_memory_search", "completed", 38, { type: "personal_memory", name: `${documentMemories.length} document chunks`, detail: `${sources}에서 관련 원문 ${documentMemories.length}개를 읽어 답변에 반영합니다.` });
-      } else report?.("personal_memory_search", "skipped", 38, { type: "personal_memory", detail: "관련 원문을 찾지 못했습니다. 원문이 없는 상태에서 내용을 추측하지 않습니다." });
+        report?.("personal_document_search", "completed", 38, { type: "personal_memory", name: `${documentMemories.length} document chunks`, detail: `${sources}에서 관련 원문 ${documentMemories.length}개를 읽어 답변에 반영합니다.` });
+      } else report?.("personal_document_search", "skipped", 38, { type: "personal_memory", detail: "관련 원문을 찾지 못했습니다. 원문이 없는 상태에서 내용을 추측하지 않습니다." });
     } catch {
       // Chat remains available if a user is signed out or document storage is unavailable.
-      report?.("personal_memory_search", "warning", 38, { type: "personal_memory", detail: "개인 메모리 조회를 완료하지 못했습니다. 원문 없이 추측하지 않고 답변을 준비합니다." });
+      report?.("personal_document_search", "warning", 38, { type: "personal_memory", detail: "개인 문서 조회를 완료하지 못했습니다. 원문 없이 추측하지 않고 답변을 준비합니다." });
     }
   }
 
@@ -297,7 +297,9 @@ function selectRelevantMemories(message: string, memories: MemoryRecord[]) {
 }
 
 function cacheIfNeeded(cacheKey: string, payload: ChatRequestPayload, response: CachedChatResponse): CachedChatResponse {
-  if (payload.settings.cacheResponses) chatCache.set(cacheKey, response);
+  // Uploaded-file context is private and can change independently of the chat
+  // history, so never reuse a server response in place of a fresh retrieval.
+  if (payload.settings.cacheResponses && !payload.memories.some((memory) => memory.tags.includes("document"))) chatCache.set(cacheKey, response);
   return response;
 }
 

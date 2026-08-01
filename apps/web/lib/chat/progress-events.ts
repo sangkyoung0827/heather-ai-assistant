@@ -8,6 +8,7 @@ export type ChatProgressStage =
   | "quick_link_write"
   | "quick_link_verify"
   | "personal_memory_search"
+  | "personal_document_search"
   | "project_context_resolve"
   | "web_search_decision"
   | "web_search"
@@ -108,6 +109,7 @@ const KO: ProgressCopy = {
   quick_link_write: "대시보드에 등록하고 있습니다.",
   quick_link_verify: "등록 결과를 확인하고 있습니다.",
   personal_memory_search: "관련 개인 메모리를 찾고 있습니다.",
+  personal_document_search: "업로드한 개인 문서 원문을 찾고 있습니다.",
   project_context_resolve: "관련 프로젝트 정보를 연결하고 있습니다.",
   web_search_decision: "최신 정보가 필요한지 판단하고 있습니다.",
   web_search: "신뢰할 수 있는 자료를 검색하고 있습니다.",
@@ -169,6 +171,7 @@ const EN: ProgressCopy = {
   quick_link_write: "Adding the link to your dashboard.",
   quick_link_verify: "Checking the saved link.",
   personal_memory_search: "Finding relevant personal memory.",
+  personal_document_search: "Finding uploaded personal-document excerpts.",
   project_context_resolve: "Connecting related project context.",
   web_search_decision: "Checking whether current information is needed.",
   web_search: "Searching trusted sources.",

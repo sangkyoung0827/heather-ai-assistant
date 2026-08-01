@@ -22,5 +22,6 @@ test("parses progress events split across arbitrary stream chunks", async () => 
 
 test("keeps progress labels free of internal reasoning details", () => {
   assert.equal(progressLabel("personal_memory_search", "ko"), "관련 개인 메모리를 찾고 있습니다.");
+  assert.equal(progressLabel("personal_document_search", "ko"), "업로드한 개인 문서 원문을 찾고 있습니다.");
   assert.equal(progressLabel("web_search", "en"), "Searching trusted sources.");
 });

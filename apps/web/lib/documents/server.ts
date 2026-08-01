@@ -99,7 +99,8 @@ export async function deleteDocument(context: DocumentContext, documentId: strin
  * Originals and storage locations never leave this server-side boundary.
  */
 export async function retrieveDocumentMemoryContext(context: DocumentContext, scope: "personal" | "research", message: string): Promise<MemoryRecord[]> {
-  const terms = message.toLocaleLowerCase().match(/[a-z]{3,}|[가-힣]{2,}/g) || [];
+  const normalizedMessage = message.toLocaleLowerCase();
+  const terms = normalizedMessage.match(/[a-z]{3,}|[가-힣]{2,}/g) || [];
   if (!terms.length) return [];
   const { data: candidates, error: candidateError } = await context.client
     .from("documents")
@@ -111,7 +112,8 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
     .limit(100);
   if (candidateError || !candidates?.length) return [];
 
-  const explicitDocumentRequest = /\b(my (?:document|file|journal|diary)|uploaded (?:document|file))\b|개인\s*메모리|내\s*(?:파일|문서|일기)|업로드(?:한|한\s*파일|한\s*문서)|일기(?:를|의|파일)?/.test(message.toLocaleLowerCase());
+  const explicitDocumentRequest = /\b(my (?:document|file|journal|diary)|uploaded (?:document|file))\b|개인\s*메모리|내\s*(?:파일|문서|일기)|업로드(?:한|한\s*파일|한\s*문서)|일기(?:를|의|파일)?/.test(normalizedMessage);
+  const journalRequest = /\b(journal|diary)\b|일기|성찰/.test(normalizedMessage);
   // Legacy HWP files are re-read from the private original automatically when
   // the user asks about their documents. The original is never converted in
   // place or replaced; extraction is only a searchable reading index.
@@ -125,26 +127,31 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
   const documents = (candidates || []).filter((document) => String(document.parsing_status) === "completed" || documentsToReprocess.some((match) => String(match.id) === String(document.id)));
   if (!documents.length) return [];
 
-  const documentIds = documents.map((document) => String(document.id));
+  const journalDocuments = journalRequest
+    ? documents.filter((document) => isJournalLikeDocument(document))
+    : [];
+  const searchDocuments = journalDocuments.length ? journalDocuments : documents;
+  const documentIds = searchDocuments.map((document) => String(document.id));
   const { data: chunks, error: chunkError } = await context.client
     .from("document_chunks")
     .select("id,document_id,chunk_index,content,section_title,page_start,page_end")
     .in("document_id", documentIds)
     .limit(240);
   if (chunkError || !chunks?.length) return [];
-  const documentById = new Map(documents.map((document) => [String(document.id), document]));
+  const documentById = new Map(searchDocuments.map((document) => [String(document.id), document]));
   return chunks
     .map((chunk) => {
       const document = documentById.get(String(chunk.document_id));
       if (!document) return null;
       const haystack = `${document.title} ${document.original_filename} ${document.document_type} ${chunk.content}`.toLocaleLowerCase();
-      const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
+      const isJournal = journalRequest && isJournalLikeDocument(document);
+      const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0) + (isJournal ? 3 : 0);
       if (!score) return null;
       const location = [chunk.section_title, chunk.page_start ? `p.${chunk.page_start}${chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ""}` : null].filter(Boolean).join(" · ");
       return {
         id: `document-${chunk.id}`,
         type: scope === "research" ? "project_context" : "important_fact",
-        content: String(chunk.content).slice(0, 900),
+        content: String(chunk.content).slice(0, 1_500),
         source: `document: ${document.title}${document.source_date ? ` (${document.source_date})` : ""}${location ? ` · ${location}` : ""}`,
         confidence: Math.min(.9, .5 + score * .1),
         tags: ["document", document.document_type, "direct_record"],
@@ -156,8 +163,13 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
     })
     .filter((item): item is MemoryRecord & { score: number } => item !== null)
     .sort((left, right) => right.score - left.score)
-    .slice(0, 4)
+    .slice(0, journalRequest ? 6 : 4)
     .map(({ score: _score, ...memory }) => memory);
+}
+
+function isJournalLikeDocument(document: { document_type?: unknown; title?: unknown; original_filename?: unknown }) {
+  const label = `${document.document_type || ""} ${document.title || ""} ${document.original_filename || ""}`.toLocaleLowerCase();
+  return /\b(journal|diary|reflection)\b|일기|성찰/.test(label);
 }
 
 export async function reprocessStoredDocument(context: DocumentContext, document: { id: string; original_filename: string; mime_type: string; extension: string; storage_path: string }) {
