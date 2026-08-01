@@ -3,7 +3,9 @@
 create table if not exists public.quick_links (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  project_id uuid references public.context_projects(id) on delete set null,
+  -- Project linkage is optional. Do not require the separate context-projects
+  -- migration for personal dashboard links to be available.
+  project_id uuid,
   name text not null check (char_length(name) between 1 and 160),
   normalized_name text not null check (char_length(normalized_name) between 1 and 180),
   url text not null check (url ~* '^https?://'),
