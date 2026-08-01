@@ -11,8 +11,9 @@ import { runAgentSearch, type SearchSource } from "../../../lib/agent-runtime-se
 import { resolveModelProfile } from "../../../lib/llm/config";
 import { buildLlmMessages } from "../../../lib/llm/messages";
 import { generateForModelRole } from "../../../lib/llm/service";
-import { enrichChatPayloadFromContext, requireContextUser } from "../../../lib/context-control/server";
+import { ContextControlError, enrichChatPayloadFromContext, requireContextUser } from "../../../lib/context-control/server";
 import { retrieveDocumentMemoryContext } from "../../../lib/documents/server";
+import { executeQuickLinkIntent, parseQuickLinkIntent } from "../../../lib/quick-links/server";
 import { DirectCommandRepository } from "../../../lib/intent/direct-command-repository";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 
@@ -23,6 +24,7 @@ interface CachedChatResponse extends ChatResponsePayload {
   model?: string;
   cached?: boolean;
   search?: { used: boolean; skillId: string; provider: string; cached: boolean; sources: SearchSource[] };
+  quickLinksChanged?: boolean;
 }
 
 type ResolvedChat = { response: CachedChatResponse; usedTools: string[] };
@@ -126,6 +128,48 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
       response: { message: directMatch.command.response, title: directMatch.command.canonicalTrigger, risk: { level: "low", requiresConfirmation: false, reason: "Saved direct command." }, provider: "direct-command", model: "server" },
       usedTools
     };
+  }
+
+  const quickLinkIntent = parseQuickLinkIntent(receivedPayload.message);
+  if (quickLinkIntent) {
+    report?.("quick_link_parse", "active", 28);
+    report?.("quick_link_parse", "completed", 34);
+    if (quickLinkIntent.url) {
+      report?.("quick_link_url_validation", "active", 38);
+      report?.("quick_link_url_validation", "completed", 44);
+    } else {
+      report?.("quick_link_url_validation", "skipped", 44);
+    }
+    report?.("quick_link_duplicate_check", "active", 50);
+    let quickLink;
+    try {
+      quickLink = await executeQuickLinkIntent(await requireContextUser(request), receivedPayload.message);
+    } catch (error) {
+      if (error instanceof ContextControlError) {
+        const korean = containsHangul(receivedPayload.message);
+        const message = error.status === 401
+          ? korean ? "자주 쓰는 사이트를 관리하려면 먼저 로그인해주세요." : "Please sign in to manage Quick Access links."
+          : error.status === 400 && /url|address|http|quick access/i.test(error.message)
+            ? korean ? "입력한 주소를 확인할 수 없습니다. http 또는 https 주소를 다시 보내주세요." : "Please provide a valid http or https URL."
+            : korean ? "자주 쓰는 사이트를 처리하지 못했습니다. 내용을 확인한 뒤 다시 시도해주세요." : "I could not update this Quick Access link. Please check the details and try again.";
+        return { response: { message, title: generateConversationTitle(receivedPayload.message), risk: { level: "low", requiresConfirmation: false, reason: "Quick Access action could not be completed." }, provider: "quick-link", model: "server" }, usedTools: ["quick_link_duplicate_check"] };
+      }
+      throw error;
+    }
+    if (quickLink) {
+      report?.("quick_link_duplicate_check", "completed", 62);
+      if (quickLink.changed) {
+        report?.("quick_link_write", "active", 70);
+        report?.("quick_link_write", "completed", 82);
+        report?.("quick_link_verify", "active", 87);
+        report?.("quick_link_verify", "completed", 94);
+      } else {
+        report?.("quick_link_write", "skipped", 82);
+        report?.("quick_link_verify", "skipped", 94);
+      }
+      usedTools.push(...quickLink.usedTools);
+      return { response: { message: quickLink.message, title: generateConversationTitle(receivedPayload.message), risk: { level: "low", requiresConfirmation: false, reason: "Personal dashboard Quick Access action." }, provider: "quick-link", model: "server", quickLinksChanged: quickLink.changed }, usedTools };
+    }
   }
 
   let payload = receivedPayload;

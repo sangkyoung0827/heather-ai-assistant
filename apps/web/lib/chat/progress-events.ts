@@ -2,6 +2,11 @@ export type ChatProgressStage =
   | "request_received"
   | "intent_analysis"
   | "direct_command_check"
+  | "quick_link_parse"
+  | "quick_link_url_validation"
+  | "quick_link_duplicate_check"
+  | "quick_link_write"
+  | "quick_link_verify"
   | "personal_memory_search"
   | "project_context_resolve"
   | "web_search_decision"
@@ -97,6 +102,11 @@ const KO: ProgressCopy = {
   request_received: "요청을 받았습니다.",
   intent_analysis: "요청의 목적을 파악하고 있습니다.",
   direct_command_check: "등록된 직접명령을 확인하고 있습니다.",
+  quick_link_parse: "사이트 정보를 정리하고 있습니다.",
+  quick_link_url_validation: "주소를 확인하고 있습니다.",
+  quick_link_duplicate_check: "중복 링크를 확인하고 있습니다.",
+  quick_link_write: "대시보드에 등록하고 있습니다.",
+  quick_link_verify: "등록 결과를 확인하고 있습니다.",
   personal_memory_search: "관련 개인 메모리를 찾고 있습니다.",
   project_context_resolve: "관련 프로젝트 정보를 연결하고 있습니다.",
   web_search_decision: "최신 정보가 필요한지 판단하고 있습니다.",
@@ -153,6 +163,11 @@ const EN: ProgressCopy = {
   request_received: "Request received.",
   intent_analysis: "Understanding the request.",
   direct_command_check: "Checking saved direct commands.",
+  quick_link_parse: "Organizing site information.",
+  quick_link_url_validation: "Checking the URL.",
+  quick_link_duplicate_check: "Checking duplicate links.",
+  quick_link_write: "Adding the link to your dashboard.",
+  quick_link_verify: "Checking the saved link.",
   personal_memory_search: "Finding relevant personal memory.",
   project_context_resolve: "Connecting related project context.",
   web_search_decision: "Checking whether current information is needed.",
