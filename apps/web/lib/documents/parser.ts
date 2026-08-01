@@ -1,4 +1,5 @@
 import { parse as parseCsv } from "csv-parse/sync";
+import { inflateRawSync } from "node:zlib";
 import mammoth from "mammoth";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
@@ -49,7 +50,7 @@ export async function extractDocument(file: File, extension: string): Promise<Do
   if (extension === "pptx") return pptxResult(bytes);
   if (["jpg", "jpeg", "png", "webp", "heic"].includes(extension)) return metadataOnly("image-metadata", "Image is safely stored. OCR is not enabled, so no text was extracted.");
   if (["m4a", "mp3", "wav"].includes(extension)) return unsupported("audio-preservation", "Audio is safely stored. Speech transcription is not configured yet.");
-  if (extension === "hwp") return unsupported("hwp-preservation", "Legacy HWP is safely stored but cannot be parsed reliably on this server. Convert it to PDF, DOCX, or HWPX to extract text.");
+  if (extension === "hwp") return hwpResult(bytes);
   return unsupported("unknown", "This format is stored but does not have a safe parser.");
 }
 
@@ -85,6 +86,62 @@ async function hwpxResult(bytes: Uint8Array): Promise<DocumentParseResult> {
   const sections = Object.keys(zip.files).filter((name) => /^Contents\/section\d+\.xml$/i.test(name)).sort();
   const text = cleanText((await Promise.all(sections.map(async (name) => xmlText(await zip.file(name)!.async("string"))))).join("\n\n"));
   return { parser: "hwpx-xml", parserVersion: "1", status: text ? "completed" : "needs_review", extractedText: text, structuredContent: { kind: "hwpx", sections: sections.length }, pageCount: sections.length || undefined, warnings: text ? [] : ["No readable HWPX text was found."], language: detectLanguage(text) };
+}
+
+function hwpResult(bytes: Uint8Array): DocumentParseResult {
+  try {
+    const compound = XLSX.CFB.read(Buffer.from(bytes), { type: "buffer" }) as unknown as {
+      FileIndex: Array<{ name: string; type?: number; content?: Uint8Array }>;
+      FullPaths: string[];
+    };
+    const compressed = isCompressedHwp(compound);
+    const sections = compound.FileIndex
+      .map((entry, index) => ({ entry, path: compound.FullPaths[index] || entry.name }))
+      .filter(({ entry, path }) => entry.type === 2 && /(?:^|\/)BodyText\/Section\d+$/i.test(path))
+      .sort((left, right) => naturalSort(left.path, right.path));
+    if (!sections.length) throw new Error("The HWP document has no readable BodyText sections.");
+
+    const text = cleanText(sections.map(({ entry }) => hwpSectionText(Buffer.from(entry.content || []), compressed)).join("\n\n"));
+    return {
+      parser: "hwp-cfb",
+      parserVersion: "1",
+      status: text ? "completed" : "needs_review",
+      extractedText: text,
+      structuredContent: { kind: "hwp", sections: sections.length, compressed },
+      pageCount: sections.length || undefined,
+      warnings: text ? [] : ["No readable HWP text was found. Convert the file to HWPX, DOCX, or PDF if it contains unsupported content."],
+      language: detectLanguage(text)
+    };
+  } catch (error) {
+    return failed("hwp-cfb", error);
+  }
+}
+
+function isCompressedHwp(compound: { FileIndex: Array<{ name: string; content?: Uint8Array }>; FullPaths: string[] }) {
+  const headerIndex = compound.FullPaths.findIndex((path) => /(?:^|\/)FileHeader$/i.test(path));
+  const header = headerIndex >= 0 ? compound.FileIndex[headerIndex]?.content : undefined;
+  return Boolean(header && header.length >= 40 && (Buffer.from(header).readUInt32LE(36) & 1) === 1);
+}
+
+function hwpSectionText(section: Buffer, compressed: boolean) {
+  const bytes = compressed ? inflateRawSync(section, { maxOutputLength: DOCUMENT_LIMITS.maxArchiveBytes }) : section;
+  const paragraphs: string[] = [];
+  let offset = 0;
+  while (offset + 4 <= bytes.length) {
+    const header = bytes.readUInt32LE(offset);
+    const tag = header & 0x3ff;
+    let size = header >>> 20;
+    offset += 4;
+    if (size === 0xfff) {
+      if (offset + 4 > bytes.length) break;
+      size = bytes.readUInt32LE(offset);
+      offset += 4;
+    }
+    if (size < 0 || offset + size > bytes.length) break;
+    if (tag === 0x43) paragraphs.push(bytes.subarray(offset, offset + size).toString("utf16le").replace(/[\u0000-\u001f]/g, " "));
+    offset += size;
+  }
+  return paragraphs.join("\n");
 }
 
 async function odtResult(bytes: Uint8Array): Promise<DocumentParseResult> {

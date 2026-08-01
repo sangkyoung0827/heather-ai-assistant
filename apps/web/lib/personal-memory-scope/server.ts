@@ -8,24 +8,30 @@ export async function getPersonalMemoryScopeData(context: ContextClient, scope: 
   const [personal, documentBackedPersonal, journals, projects, projectMemories, operationalRecords] = await Promise.all([
     context.client.from("personal_memories").select("id,content,memory_type,tags,metadata,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).eq("archived", false).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("personal_memories").select("id", { count: "exact", head: true }).eq("user_id", context.user.id).eq("archived", false).contains("metadata", { source: "document_ingestion" }),
-    context.client.from("documents").select("id,title,source_date,document_type,uploaded_at,document_extractions(extracted_text,status)", { count: "exact" }).eq("user_id", context.user.id).eq("memory_scope", "personal").eq("document_type", "journal").is("deleted_at", null).in("parsing_status", ["completed", "needs_review"]).order("source_date", { ascending: false }).limit(1000),
+    context.client.from("documents").select("id,title,source_date,document_type,uploaded_at,document_extractions(extracted_text,status)", { count: "exact" }).eq("user_id", context.user.id).eq("memory_scope", "personal").is("deleted_at", null).in("parsing_status", ["completed", "needs_review"]).order("source_date", { ascending: false }).limit(1000),
     context.client.from("context_projects").select("id,name,status,created_at,updated_at", { count: "exact" }).eq("owner_user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("project_context_memories").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("operational_contexts").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000)
   ]);
-  const failure = [personal, documentBackedPersonal, journals, projects, projectMemories, operationalRecords].find((result) => result.error)?.error;
+  // Project-context migrations are optional for personal journal and direct
+  // memory search. A missing project table must not hide uploaded documents.
+  const failure = [personal, documentBackedPersonal, journals].find((result) => result.error)?.error;
   if (failure) throw new ContextControlError("Personal memory search needs the latest Heather database migration.", 503);
 
-  const direct = (personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).map((row) => toDirectMemory(row));
-  const journal = (journals.data || []).map((row) => toJournalMemory(row));
-  const project = [
-    ...(projects.data || []).map((row) => toProjectCreationMemory(row)),
-    ...(projectMemories.data || []).map((row) => toProjectRecordMemory(row, "project_context")),
-    ...(operationalRecords.data || []).map((row) => toProjectRecordMemory(row, "operational_record"))
+  const uploadedDocuments = journals.data || [];
+  const direct = [
+    ...(personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).map((row) => toDirectMemory(row)),
+    ...uploadedDocuments.filter((row) => row.document_type !== "journal").map((row) => toUploadedDocumentMemory(row))
   ];
-  const directCount = Math.max(0, (personal.count || 0) - (documentBackedPersonal.count || 0));
-  const journalCount = journals.count || 0;
-  const projectCount = (projects.count || 0) + (projectMemories.count || 0) + (operationalRecords.count || 0);
+  const journal = uploadedDocuments.filter((row) => row.document_type === "journal").map((row) => toJournalMemory(row));
+  const project = [
+    ...(projects.error ? [] : projects.data || []).map((row) => toProjectCreationMemory(row)),
+    ...(projectMemories.error ? [] : projectMemories.data || []).map((row) => toProjectRecordMemory(row, "project_context")),
+    ...(operationalRecords.error ? [] : operationalRecords.data || []).map((row) => toProjectRecordMemory(row, "operational_record"))
+  ];
+  const directCount = Math.max(0, (personal.count || 0) - (documentBackedPersonal.count || 0)) + uploadedDocuments.filter((row) => row.document_type !== "journal").length;
+  const journalCount = journal.length;
+  const projectCount = (projects.error ? 0 : projects.count || 0) + (projectMemories.error ? 0 : projectMemories.count || 0) + (operationalRecords.error ? 0 : operationalRecords.count || 0);
   const counts: PersonalMemoryScopeCounts = { all: directCount + journalCount + projectCount, journal: journalCount, direct: directCount, project: projectCount };
   const source = scope === "journal" ? journal : scope === "direct" ? direct : scope === "project" ? project : [...journal, ...direct, ...project];
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -47,6 +53,11 @@ function toJournalMemory(row: { id: string; title: string; source_date: string |
   const extraction = row.document_extractions?.[0];
   const date = row.source_date || row.uploaded_at;
   return { id: `journal-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || "This journal document has no readable text yet.").slice(0, 4000), source: `journal · ${row.title}${row.source_date ? ` · ${row.source_date}` : " · undated"}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["journal", "document", "direct_record"], created_at: date, updated_at: date, archived: false };
+}
+
+function toUploadedDocumentMemory(row: { id: string; title: string; document_type: string; uploaded_at: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
+  const extraction = row.document_extractions?.[0];
+  return { id: `direct-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || "This uploaded document has no readable text yet.").slice(0, 4000), source: `direct note · ${row.title}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["document", String(row.document_type), "direct_record"], created_at: String(row.uploaded_at), updated_at: String(row.uploaded_at), archived: false };
 }
 
 function toProjectCreationMemory(row: { id: string; name: string; status: string; created_at: string; updated_at: string }): MemoryRecord {

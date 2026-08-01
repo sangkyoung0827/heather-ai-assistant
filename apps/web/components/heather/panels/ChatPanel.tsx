@@ -29,6 +29,7 @@ import type {
   TeachingRecord
 } from "@heather/core";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
+import { PersonalConversationRepository } from "../../../lib/personal-conversation-repository";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { ThinkingStatusPanel } from "../chat/ThinkingStatusPanel";
 import { readChatProgressStream, type ChatProgressEvent, type ChatStreamEvent } from "../../../lib/chat/progress-events";
@@ -43,6 +44,7 @@ interface ChatPanelProps {
   settings: HeatherSettings;
   onSaveConversation: (conversation: Conversation) => Promise<void>;
   onDeleteConversation: (id: string) => Promise<void>;
+  onMergeConversations: (conversations: Conversation[]) => Promise<void>;
   onSaveMemory: (memory: MemoryRecord) => Promise<void>;
   onSaveSettings: (settings: HeatherSettings) => Promise<void>;
 }
@@ -93,6 +95,7 @@ export function ChatPanel({
   settings,
   onSaveConversation,
   onDeleteConversation,
+  onMergeConversations,
   onSaveMemory,
   onSaveSettings
 }: ChatPanelProps) {
@@ -111,6 +114,7 @@ export function ChatPanel({
   const recentSubmissionRef = useRef<RecentSubmission | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposingRef = useRef(false);
+  const conversationRepositoryRef = useRef(new PersonalConversationRepository());
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) || null,
@@ -151,6 +155,23 @@ export function ChatPanel({
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  useEffect(() => {
+    let active = true;
+    async function restorePersonalConversations() {
+      const session = await getSupabaseBrowserClient()?.auth.getSession();
+      if (!session?.data.session?.access_token) return;
+      try {
+        const persisted = await conversationRepositoryRef.current.list();
+        if (active && persisted.length) await onMergeConversations(persisted);
+      } catch {
+        // The current browser copy remains available while the account storage
+        // migration is being applied or a transient network error is resolved.
+      }
+    }
+    void restorePersonalConversations();
+    return () => { active = false; };
+  }, [onMergeConversations]);
+
   async function handleNewConversation() {
     const conversation = createConversation();
     await onSaveConversation(conversation);
@@ -161,6 +182,7 @@ export function ChatPanel({
   async function handleDeleteConversation(id: string) {
     if (!window.confirm("이 대화를 삭제할까요?")) return;
 
+    try { await conversationRepositoryRef.current.archive(id); } catch { /* Local removal remains available. */ }
     await onDeleteConversation(id);
     if (activeConversationId === id) {
       setActiveConversationId(null);
@@ -219,7 +241,19 @@ export function ChatPanel({
       };
 
       await onSaveConversation(finalConversation);
-      setProviderStatus(formatProviderStatus(data));
+      let persistenceFailed = false;
+      try {
+        const persistedConversation = await conversationRepositoryRef.current.save(finalConversation);
+        if (persistedConversation.id !== finalConversation.id) {
+          await onDeleteConversation(finalConversation.id);
+          await onSaveConversation(persistedConversation);
+          setActiveConversationId(persistedConversation.id);
+        }
+      } catch {
+        // Do not lose a completed answer if account persistence is temporarily unavailable.
+        persistenceFailed = true;
+      }
+      setProviderStatus(persistenceFailed ? "답변은 완료됐지만 개인 채팅 기록을 계정에 저장하지 못했습니다." : formatProviderStatus(data));
 
       if (data.meteredApiCall) {
         await onSaveSettings(incrementPaidApiCount(settings));

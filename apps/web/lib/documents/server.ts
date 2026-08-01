@@ -93,23 +93,34 @@ export async function deleteDocument(context: DocumentContext, documentId: strin
 }
 
 /**
- * Retrieves only explicitly searchable, non-sensitive chunks. The caller uses
- * this as transient chat context; originals and storage locations never leave
- * this server-side boundary.
+ * Retrieves a small, relevant excerpt from the signed-in user's personal
+ * documents. High-sensitivity journals and review-mode uploads are included
+ * only after the user explicitly enabled personal document chat access.
+ * Originals and storage locations never leave this server-side boundary.
  */
 export async function retrieveDocumentMemoryContext(context: DocumentContext, scope: "personal" | "research", message: string): Promise<MemoryRecord[]> {
   const terms = message.toLocaleLowerCase().match(/[a-z]{3,}|[가-힣]{2,}/g) || [];
   if (!terms.length) return [];
-  const { data: documents, error: documentError } = await context.client
+  const { data: candidates, error: candidateError } = await context.client
     .from("documents")
-    .select("id,title,source_date,document_type")
+    .select("id,title,source_date,document_type,original_filename,mime_type,extension,storage_path,parsing_status")
     .eq("memory_scope", scope)
-    .eq("access_mode", "search_allowed")
-    .eq("sensitivity", "normal")
-    .in("parsing_status", ["completed", "needs_review"])
+    .in("access_mode", ["search_allowed", "review", "memory_candidate_allowed"])
+    .in("sensitivity", ["normal", "high"])
     .is("deleted_at", null)
     .limit(100);
-  if (documentError || !documents?.length) return [];
+  if (candidateError || !candidates?.length) return [];
+
+  // A legacy HWP uploaded before the parser upgrade may have been preserved
+  // without chunks. Reprocess only a file whose title matches this request.
+  const titleMatches = (candidates || []).filter((document) => {
+    const title = `${document.title} ${document.original_filename}`.toLocaleLowerCase();
+    return !["completed", "needs_review"].includes(String(document.parsing_status)) && terms.some((term) => title.includes(term));
+  }).slice(0, 1);
+  await Promise.all(titleMatches.map((document) => reprocessStoredDocument(context, document)));
+
+  const documents = (candidates || []).filter((document) => ["completed", "needs_review"].includes(String(document.parsing_status)) || titleMatches.some((match) => String(match.id) === String(document.id)));
+  if (!documents.length) return [];
 
   const documentIds = documents.map((document) => String(document.id));
   const { data: chunks, error: chunkError } = await context.client
@@ -144,6 +155,25 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
     .sort((left, right) => right.score - left.score)
     .slice(0, 4)
     .map(({ score: _score, ...memory }) => memory);
+}
+
+async function reprocessStoredDocument(context: DocumentContext, document: { id: string; original_filename: string; mime_type: string; extension: string; storage_path: string }) {
+  try {
+    const downloaded = await context.client.storage.from("documents").download(String(document.storage_path));
+    if (downloaded.error || !downloaded.data) return;
+    const file = new File([await downloaded.data.arrayBuffer()], String(document.original_filename), { type: String(document.mime_type || "application/octet-stream") });
+    const extraction = await extractDocument(file, String(document.extension));
+    const { data: extractionRow, error: extractionError } = await context.client.from("document_extractions")
+      .upsert({ document_id: document.id, parser: extraction.parser, parser_version: extraction.parserVersion, status: extraction.status, extracted_text: extraction.extractedText || null, structured_content: extraction.structuredContent, page_count: extraction.pageCount || null, word_count: wordCount(extraction.extractedText), warnings: extraction.warnings, completed_at: new Date().toISOString() }, { onConflict: "document_id" })
+      .select("id").single();
+    if (extractionError || !extractionRow) return;
+    await context.client.from("document_chunks").delete().eq("document_id", document.id);
+    const chunks = chunkText(extraction.extractedText);
+    if (chunks.length) await context.client.from("document_chunks").insert(chunks.map((content, chunkIndex) => ({ document_id: document.id, extraction_id: extractionRow.id, chunk_index: chunkIndex, content, metadata: { parser: extraction.parser, reprocessed: true } })));
+    await context.client.from("documents").update({ parsing_status: extraction.status, language: extraction.language || null, source_date: extraction.sourceDate || null, metadata: { storage_path: document.storage_path, parser: extraction.parser, warnings: extraction.warnings } }).eq("id", document.id);
+  } catch {
+    // Keep the original safely preserved if a legacy file cannot be re-read.
+  }
 }
 
 async function uploadOne(context: DocumentContext, file: File, input: { scope: DocumentScope; documentType: string; accessMode: string; requestedSensitivity: string; title: string }) {

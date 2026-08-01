@@ -118,6 +118,13 @@ export function useHeatherData() {
     [db]
   );
 
+  const mergeConversations = useCallback(
+    async (incoming: Conversation[]) => {
+      setConversations((current) => sortByUpdated([...current.filter((conversation) => !incoming.some((item) => item.id === conversation.id)), ...incoming]));
+    },
+    []
+  );
+
   const saveProject = useCallback(
     async (project: ProjectRecord) => {
       setProjects((current) => sortByUpdated(upsert(current, project)));
@@ -208,6 +215,7 @@ export function useHeatherData() {
     saveSettings,
     saveConversation,
     deleteConversation,
+    mergeConversations,
     saveProject,
     deleteProject,
     saveMemory,

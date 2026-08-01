@@ -17,7 +17,7 @@ export function DocumentIngestionPanel({ scope, locale, onRecordsChanged }: { sc
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [documentType, setDocumentType] = useState(scope === "personal" ? "journal" : "paper");
-  const [accessMode, setAccessMode] = useState("review");
+  const [accessMode, setAccessMode] = useState("search_allowed");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");

@@ -49,12 +49,21 @@ test("extracts CSV, spreadsheet, and presentation structure", async () => {
   assert.match(pptxResult.extractedText, /DHA production review/);
 });
 
-test("preserves unsupported legacy HWP and audio with explicit warnings", async () => {
-  const hwp = new File([new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00])], "legacy.hwp", { type: "application/x-hwp" });
+test("extracts readable legacy HWP text and preserves audio with explicit warnings", async () => {
+  const cfb = XLSX.CFB.utils.cfb_new();
+  const header = Buffer.alloc(40);
+  Buffer.from("HWP Document File").copy(header);
+  const text = Buffer.from("성찰 기록", "utf16le");
+  const record = Buffer.alloc(4);
+  record.writeUInt32LE(0x43 | (text.length << 20), 0);
+  XLSX.CFB.utils.cfb_add(cfb, "FileHeader", header);
+  XLSX.CFB.utils.cfb_add(cfb, "BodyText/Section0", Buffer.concat([record, text]));
+  const hwp = new File([XLSX.CFB.write(cfb, { type: "buffer" })], "legacy.hwp", { type: "application/x-hwp" });
   const hwpValidation = await validateDocumentFile(hwp);
   const hwpResult = await extractDocument(hwp, hwpValidation.extension);
-  assert.equal(hwpResult.status, "unsupported");
-  assert.match(hwpResult.warnings[0], /Convert/);
+  assert.equal(hwpResult.status, "completed");
+  assert.equal(hwpResult.parser, "hwp-cfb");
+  assert.match(hwpResult.extractedText, /성찰 기록/);
 
   const wav = new File([new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45])], "recording.wav", { type: "audio/wav" });
   const wavValidation = await validateDocumentFile(wav);
