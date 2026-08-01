@@ -13,7 +13,8 @@ export class LlmProviderError extends Error {
   constructor(
     public readonly code: LlmErrorCode,
     public readonly retryable: boolean,
-    public readonly status?: number
+    public readonly status?: number,
+    public readonly retryAfterMs?: number
   ) {
     super(code);
     this.name = "LlmProviderError";

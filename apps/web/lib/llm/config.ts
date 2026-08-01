@@ -40,7 +40,7 @@ export function getLlmConfig(): LlmConfig {
     maxOutputTokens: integerFromEnv("LLM_MAX_OUTPUT_TOKENS", 1200, 32, 4096),
     researchMaxOutputTokens: integerFromEnv("LLM_RESEARCH_MAX_OUTPUT_TOKENS", 520, 128, 4096),
     timeoutMs: integerFromEnv("LLM_TIMEOUT_MS", 45000, 1000, 120000),
-    maxRetries: integerFromEnv("LLM_MAX_RETRIES", 2, 0, 4),
+    maxRetries: integerFromEnv("LLM_MAX_RETRIES", 3, 0, 4),
     temperature: numberFromEnv("LLM_TEMPERATURE", 0.3, 0, 1),
     maxInputChars: integerFromEnv("LLM_MAX_INPUT_CHARS", 12000, 500, 50000),
     maxHistoryMessages: integerFromEnv("LLM_MAX_HISTORY_MESSAGES", 12, 0, 30)

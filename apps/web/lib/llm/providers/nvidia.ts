@@ -23,8 +23,14 @@ export class NvidiaLlmProvider implements LlmProvider {
         lastError = error instanceof LlmProviderError
           ? error
           : new LlmProviderError("upstream", true);
+        console.warn("NVIDIA LLM request failed", {
+          model: this.profile.modelId,
+          code: lastError.code,
+          status: lastError.status,
+          attempt: attempt + 1
+        });
         if (!lastError.retryable || attempt === this.config.maxRetries) throw lastError;
-        await delayWithJitter(attempt);
+        await delayWithJitter(attempt, lastError.retryAfterMs);
       }
     }
 
@@ -52,7 +58,7 @@ export class NvidiaLlmProvider implements LlmProvider {
         cache: "no-store"
       });
 
-      if (!response.ok) throw errorForStatus(response.status);
+      if (!response.ok) throw errorForStatus(response.status, response.headers.get("retry-after"));
       const body = await response.json() as NvidiaApiResponse;
       const content = body.choices?.[0]?.message?.content?.trim();
       if (!content) throw new LlmProviderError("invalid_response", true);
@@ -69,17 +75,26 @@ export class NvidiaLlmProvider implements LlmProvider {
   }
 }
 
-function errorForStatus(status: number): LlmProviderError {
+function errorForStatus(status: number, retryAfter: string | null): LlmProviderError {
   if (status === 400 || status === 422) return new LlmProviderError("validation", false, status);
   if (status === 401) return new LlmProviderError("authentication", false, status);
   if (status === 403) return new LlmProviderError("permission", false, status);
   if (status === 404) return new LlmProviderError("not_found", false, status);
-  if (status === 429) return new LlmProviderError("rate_limit", true, status);
-  return new LlmProviderError("upstream", [500, 502, 503, 504].includes(status), status);
+  if (status === 429) return new LlmProviderError("rate_limit", true, status, retryAfterMs(retryAfter));
+  return new LlmProviderError("upstream", [500, 502, 503, 504].includes(status), status, retryAfterMs(retryAfter));
 }
 
-function delayWithJitter(attempt: number): Promise<void> {
-  const baseDelay = 350 * 2 ** attempt;
+function retryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number.parseFloat(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(15_000, Math.round(seconds * 1_000));
+  const date = Date.parse(value);
+  if (!Number.isNaN(date)) return Math.min(15_000, Math.max(0, date - Date.now()));
+  return undefined;
+}
+
+function delayWithJitter(attempt: number, retryAfter?: number): Promise<void> {
+  const baseDelay = Math.max(retryAfter || 0, 750 * 2 ** attempt);
   const jitter = Math.floor(Math.random() * 200);
   return new Promise((resolve) => setTimeout(resolve, baseDelay + jitter));
 }
