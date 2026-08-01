@@ -1,5 +1,7 @@
 export type ChatProgressStage =
   | "request_received"
+  | "execution_mode_check"
+  | "local_engine_status"
   | "intent_analysis"
   | "direct_command_check"
   | "quick_link_parse"
@@ -100,13 +102,15 @@ export type ChatProgressEvent = {
 export type ChatStreamEvent =
   | { type: "progress"; data: ChatProgressEvent }
   | { type: "content_delta"; data: { text: string } }
-  | { type: "done"; data: { used_tools: string[]; duration_ms: number; provider?: string; model?: string; cached?: boolean; conversation_id?: string; title?: string; personal_memo?: { id: string; title: string; action: string } } }
+  | { type: "done"; data: { used_tools: string[]; duration_ms: number; provider?: string; model?: string; cached?: boolean; conversation_id?: string; title?: string; personal_memo?: { id: string; title: string; action: string }; execution?: { requested_execution_mode: "HEATHER_BASIC" | "ADVANCED_REASONING"; actual_execution_mode: "HEATHER_BASIC" | "ADVANCED_REASONING"; chat_type: "general" | "research"; local_engine_used: boolean; external_llm_used: boolean; error_code?: string; search_used?: boolean } } }
   | { type: "error"; data: { user_message: string; recoverable: boolean } };
 
 type ProgressCopy = Record<HeatherProgressStage, string>;
 
 const KO: ProgressCopy = {
   request_received: "요청을 받았습니다.",
+  execution_mode_check: "응답 방식을 확인하고 있습니다.",
+  local_engine_status: "헤더 기본 엔진 상태를 확인하고 있습니다.",
   intent_analysis: "요청의 목적을 파악하고 있습니다.",
   direct_command_check: "등록된 직접명령을 확인하고 있습니다.",
   quick_link_parse: "사이트 정보를 정리하고 있습니다.",
@@ -175,6 +179,8 @@ const KO: ProgressCopy = {
 
 const EN: ProgressCopy = {
   request_received: "Request received.",
+  execution_mode_check: "Checking the response mode.",
+  local_engine_status: "Checking Heather basic engine status.",
   intent_analysis: "Understanding the request.",
   direct_command_check: "Checking saved direct commands.",
   quick_link_parse: "Organizing site information.",

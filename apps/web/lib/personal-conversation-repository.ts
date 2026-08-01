@@ -1,4 +1,4 @@
-import type { Conversation } from "@heather/core";
+import type { ChatExecutionMode, Conversation } from "@heather/core";
 import { getSupabaseBrowserClient } from "./supabase-client";
 
 export class PersonalConversationRepository {
@@ -20,6 +20,12 @@ export class PersonalConversationRepository {
     if (!isUuid(id)) return;
     const response = await fetch("/api/personal-conversations", { method: "PATCH", headers: { ...(await this.headers()), "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
     if (!response.ok) throw new Error("Could not archive personal conversation.");
+  }
+
+  async setExecutionMode(id: string, executionMode: ChatExecutionMode) {
+    if (!isUuid(id)) return;
+    const response = await fetch("/api/personal-conversations", { method: "PATCH", headers: { ...(await this.headers()), "Content-Type": "application/json" }, body: JSON.stringify({ id, executionMode }) });
+    if (!response.ok) throw new Error("Could not update the conversation execution mode.");
   }
 
   private async headers() {

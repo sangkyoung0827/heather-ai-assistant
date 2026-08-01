@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import type { Conversation } from "@heather/core";
 import { requireContextUser } from "../../../lib/context-control/server";
-import { archivePersonalConversation, listPersonalConversations, savePersonalConversation } from "../../../lib/personal-conversation-server";
+import { archivePersonalConversation, listPersonalConversations, savePersonalConversation, updatePersonalConversationExecutionMode } from "../../../lib/personal-conversation-server";
+import { parseChatExecutionMode } from "../../../lib/chat/execution-mode";
 
 export const runtime = "nodejs";
 
@@ -28,8 +29,14 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const context = await requireContextUser(request);
-    const body = await request.json() as { id?: string };
+    const body = await request.json() as { id?: string; executionMode?: unknown };
     if (!body.id) return NextResponse.json({ error: "대화 ID가 필요합니다." }, { status: 400 });
+    if (body.executionMode !== undefined) {
+      const executionMode = parseChatExecutionMode(body.executionMode);
+      if (!executionMode) return NextResponse.json({ error: "허용되지 않은 실행 모드입니다." }, { status: 400 });
+      await updatePersonalConversationExecutionMode(context.user.id, body.id, executionMode);
+      return NextResponse.json({ ok: true, executionMode });
+    }
     await archivePersonalConversation(context.user.id, body.id);
     return NextResponse.json({ ok: true });
   } catch {

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
 import type { ConversationType } from "../../../../lib/conversations/types";
+import { parseChatExecutionMode } from "../../../../lib/chat/execution-mode";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
     const clientMessageId = String(form.get("clientMessageId") || "").trim();
     const conversationId = String(form.get("conversationId") || "").trim() || undefined;
     const type = parseType(form.get("type"));
+    const executionMode = parseChatExecutionMode(form.get("executionMode"));
     const files = form.getAll("files").filter((item): item is File => item instanceof File);
     if (!clientMessageId || !files.length || files.length > MAX_FILES) return NextResponse.json({ error: "Invalid media message." }, { status: 400 });
     if (files.some((file) => file.size <= 0 || file.size > MAX_FILE_BYTES) || files.reduce((total, file) => total + file.size, 0) > MAX_TOTAL_BYTES) {
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
       title: createConversationTitle(content || "사진", type),
       content,
       clientMessageId,
+      executionMode: executionMode || undefined,
       allowEmpty: true
     });
     createdMessageId = turn.userMessage.id;

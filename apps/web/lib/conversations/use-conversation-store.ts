@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Conversation, ConversationMessage } from "@heather/core";
 import type { ConversationListItem, ConversationMessagePage, ConversationPage, ConversationType } from "./types";
+import type { ChatExecutionMode } from "@heather/core";
+import { getSupabaseBrowserClient } from "../supabase-client";
 
 const PAGE_SIZE = 25;
 
@@ -131,10 +133,21 @@ export function useConversationStore(type: ConversationType) {
     if (activeConversation?.id === id) await selectConversation(null);
   }, [activeConversation?.id, selectConversation, type]);
 
+  const setExecutionMode = useCallback(async (id: string, executionMode: ChatExecutionMode) => {
+    const session = await getSupabaseBrowserClient()?.auth.getSession();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (session?.data.session?.access_token) headers.Authorization = `Bearer ${session.data.session.access_token}`;
+    const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: "PATCH", headers, body: JSON.stringify({ type, executionMode }) });
+    if (!response.ok) throw new Error("Conversation execution mode could not be updated.");
+    const { conversation } = await response.json() as { conversation: ConversationListItem };
+    setConversations((current) => current.map((item) => item.id === id ? conversation : item));
+    setActiveConversation((current) => current?.id === id ? { ...current, executionMode: conversation.executionMode, executionModeUpdatedAt: conversation.executionModeUpdatedAt } : current);
+  }, [type]);
+
   const applyOptimistic = useCallback((message: ConversationMessage) => {
     const base: Conversation = activeConversation || { id: `pending-${message.id}`, title: type === "research" ? "새 연구 대화" : "새 대화", messages: [], createdAt: message.createdAt, updatedAt: message.createdAt, conversationType: type };
     setActiveConversation({ ...base, title: base.messages.length ? base.title : message.content.slice(0, 48), messages: [...base.messages, message], updatedAt: message.createdAt });
   }, [activeConversation, type]);
 
-  return { conversations, activeConversation, loading, loadingMore, selectConversation, searchConversations, refreshAfterSend, archiveConversation, applyOptimistic, loadMore, loadOlderMessages, setNewConversation: () => selectConversation(null), activeConversationId: activeConversation?.id || null };
+  return { conversations, activeConversation, loading, loadingMore, selectConversation, searchConversations, refreshAfterSend, archiveConversation, setExecutionMode, applyOptimistic, loadMore, loadOlderMessages, setNewConversation: () => selectConversation(null), activeConversationId: activeConversation?.id || null };
 }

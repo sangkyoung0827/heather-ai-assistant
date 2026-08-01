@@ -92,6 +92,19 @@ export type ProjectStatus = "idea" | "active" | "paused" | "blocked" | "done";
 export type ProjectPriority = "low" | "medium" | "high" | "urgent";
 
 export type ConversationRole = "system" | "user" | "assistant";
+export type ChatExecutionMode = "HEATHER_BASIC" | "ADVANCED_REASONING";
+export type ChatType = "general" | "research";
+
+export interface ChatExecutionMetadata {
+  requestedExecutionMode: ChatExecutionMode;
+  actualExecutionMode: ChatExecutionMode;
+  chatType: ChatType;
+  localEngineUsed: boolean;
+  externalLlmUsed: boolean;
+  errorCode?: string;
+  durationMs?: number;
+  searchUsed?: boolean;
+}
 
 export interface MessageAttachment {
   id: string;
@@ -114,6 +127,7 @@ export interface ConversationMessage {
   source?: "text" | "voice";
   provider?: string;
   model?: string;
+  execution?: ChatExecutionMetadata;
   attachments?: MessageAttachment[];
 }
 
@@ -126,6 +140,8 @@ export interface Conversation {
   archived?: boolean;
   conversationType?: "general" | "research";
   lastMessageAt?: string;
+  executionMode?: ChatExecutionMode;
+  executionModeUpdatedAt?: string;
 }
 
 export interface ProjectRecord {
@@ -363,6 +379,8 @@ export interface ChatRequestPayload {
   automationRecipes?: AutomationRecipe[];
   /** The media route has already persisted the user message before generating a reply. */
   messageAlreadyPersisted?: boolean;
+  /** Only the execution mode is client-selectable. Provider/model stay server-owned. */
+  executionMode?: ChatExecutionMode;
 }
 
 export interface ChatResponsePayload {
@@ -374,4 +392,5 @@ export interface ChatResponsePayload {
   selectedTool?: GenerativeToolId;
   appliedTeachingIds?: string[];
   memorySuggestion?: Omit<MemoryRecord, "id" | "created_at" | "updated_at" | "archived">;
+  execution?: ChatExecutionMetadata;
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { generateConversationTitle, type ChatRequestPayload, type ChatResponsePayload, type MemoryRecord } from "@heather/core";
+import { generateConversationTitle, type ChatExecutionMetadata, type ChatExecutionMode, type ChatRequestPayload, type ChatResponsePayload, type MemoryRecord } from "@heather/core";
 import { runAgentSearch, type SearchSource } from "../../../lib/agent-runtime-search";
 import { resolveModelProfile } from "../../../lib/llm/config";
 import { buildLlmMessages } from "../../../lib/llm/messages";
@@ -11,11 +11,14 @@ import { executeQuickLinkIntent, parseQuickLinkIntent } from "../../../lib/quick
 import { DirectCommandRepository } from "../../../lib/intent/direct-command-repository";
 import { parsePersonalMemoIntent, runPersonalMemoSkill, type PersonalMemoSkillResult } from "../../../lib/personal-memos/server";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent } from "../../../lib/chat/progress-events";
+import { executePersonalHeatherBasic } from "../../../lib/chat/heather-basic-engine";
+import { DEFAULT_CHAT_EXECUTION_MODE, executionModeForStoredValue, isExecutionModeSelectorEnabled, parseChatExecutionMode } from "../../../lib/chat/execution-mode";
+import { getPersonalConversationExecutionMode } from "../../../lib/personal-conversation-server";
 
 export const runtime = "nodejs";
 
 interface CachedChatResponse extends ChatResponsePayload {
-  provider: string;
+  provider?: string;
   model?: string;
   cached?: boolean;
   search?: { used: boolean; skillId: string; provider: string; cached: boolean; sources: SearchSource[] };
@@ -86,7 +89,8 @@ function createProgressStream(request: Request, receivedPayload: ChatRequestPayl
         }
         emit({ type: "content_delta", data: { text: resolved.response.message } });
         report("completed", "completed", 100);
-        emit({ type: "done", data: { used_tools: resolved.usedTools, duration_ms: Date.now() - startedAt, provider: resolved.response.provider, model: resolved.response.model, cached: resolved.response.cached, personal_memo: resolved.response.personalMemo } });
+        const durationMs = Date.now() - startedAt;
+        emit({ type: "done", data: { used_tools: resolved.usedTools, duration_ms: durationMs, provider: resolved.response.provider, model: resolved.response.model, cached: resolved.response.cached, personal_memo: resolved.response.personalMemo, execution: serializeExecution(resolved.response.execution || advancedExecution("general", resolved.response.provider), durationMs) } });
       } catch (error) {
         report("failed", "failed", 100);
         emit({ type: "error", data: { user_message: safeError(error), recoverable: true } });
@@ -104,6 +108,15 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   const usedTools: string[] = [];
   report?.("request_received", "active", 4);
   report?.("request_received", "completed", 8);
+  report?.("execution_mode_check", "active", 10);
+  const executionMode = await resolvePersonalExecutionMode(request, receivedPayload);
+  report?.("execution_mode_check", "completed", 14);
+  if (executionMode === "HEATHER_BASIC") {
+    report?.("local_engine_status", "active", 40);
+    const response = executePersonalHeatherBasic(receivedPayload.message);
+    report?.("local_engine_status", "warning", 90, { detail: "로컬 엔진이 아직 연결되지 않았습니다." });
+    return { response, usedTools };
+  }
   report?.("intent_analysis", "active", 12);
   const intent = classifyIntent(receivedPayload.message);
   const personalDocumentRequest = shouldSearchPersonalDocuments(receivedPayload.message);
@@ -288,6 +301,29 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   usedTools.push("llm");
   return { response, usedTools };
 }
+
+async function resolvePersonalExecutionMode(request: Request, payload: ChatRequestPayload): Promise<ChatExecutionMode> {
+  if (!isExecutionModeSelectorEnabled()) return DEFAULT_CHAT_EXECUTION_MODE;
+  const requested = parseChatExecutionMode(payload.executionMode) || DEFAULT_CHAT_EXECUTION_MODE;
+  if (!isPersistedConversationId(payload.conversationId)) {
+    if (requested === "HEATHER_BASIC") await requireContextUser(request);
+    return requested;
+  }
+  const context = await requireContextUser(request);
+  const stored = await getPersonalConversationExecutionMode(context.user.id, payload.conversationId!);
+  if (!stored) throw new ContextControlError("Conversation was not found.", 404);
+  return executionModeForStoredValue(stored);
+}
+
+function advancedExecution(chatType: "general" | "research", provider?: string): ChatExecutionMetadata {
+  return { requestedExecutionMode: "ADVANCED_REASONING", actualExecutionMode: "ADVANCED_REASONING", chatType, localEngineUsed: false, externalLlmUsed: provider === "nvidia" };
+}
+
+function serializeExecution(execution: ChatExecutionMetadata, durationMs: number) {
+  return { requested_execution_mode: execution.requestedExecutionMode, actual_execution_mode: execution.actualExecutionMode, chat_type: execution.chatType, local_engine_used: execution.localEngineUsed, external_llm_used: execution.externalLlmUsed, error_code: execution.errorCode, search_used: execution.searchUsed };
+}
+
+function isPersistedConversationId(value: string | undefined) { return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)); }
 
 async function generateHeatherResponse(payload: ChatRequestPayload, cacheKey: string) {
   const profile = resolveModelProfile("general");

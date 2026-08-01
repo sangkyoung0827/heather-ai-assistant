@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { ConversationRepository } from "../../../../lib/conversations/repository";
 import type { ConversationType } from "../../../../lib/conversations/types";
+import { parseChatExecutionMode } from "../../../../lib/chat/execution-mode";
+import { requireContextUser } from "../../../../lib/context-control/server";
 
 export const runtime = "nodejs";
 
@@ -19,10 +21,13 @@ export async function GET(request: Request, { params }: Context) {
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
-    const body = await request.json() as { type?: string; title?: string; archived?: boolean };
+    const body = await request.json() as { type?: string; title?: string; archived?: boolean; executionMode?: unknown };
     const type = parseType(body.type || null);
     if (!type) return NextResponse.json({ error: "Invalid conversation type." }, { status: 400 });
-    const conversation = await new ConversationRepository().update(params.id, type, { title: body.title, archived: body.archived });
+    const executionMode = body.executionMode === undefined ? undefined : parseChatExecutionMode(body.executionMode);
+    if (body.executionMode !== undefined && !executionMode) return NextResponse.json({ error: "Invalid execution mode." }, { status: 400 });
+    const context = executionMode ? await requireContextUser(request) : null;
+    const conversation = await new ConversationRepository().update(params.id, type, { title: body.title, archived: body.archived, executionMode: executionMode || undefined, ownerId: context?.user.id });
     return NextResponse.json({ conversation });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Conversation could not be updated." }, { status: 400 });

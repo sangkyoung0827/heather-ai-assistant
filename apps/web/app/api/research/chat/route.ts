@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateConversationTitle } from "@heather/core";
-import type { ChatRequestPayload, ProjectRecord } from "@heather/core";
+import type { ChatExecutionMetadata, ChatExecutionMode, ChatRequestPayload, ProjectRecord } from "@heather/core";
 import { resolveModelProfile } from "../../../../lib/llm/config";
 import { LlmProviderError } from "../../../../lib/llm/errors";
 import { isValidChatPayload } from "../../../../lib/llm/messages";
@@ -15,6 +15,8 @@ import { externalDiscoveryUnavailableMessage, formatResearchResponse, verifiedRe
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent, type HeatherProgressStage } from "../../../../lib/chat/progress-events";
 import { requireContextUser } from "../../../../lib/context-control/server";
 import { retrieveDocumentMemoryContext } from "../../../../lib/documents/server";
+import { executeResearcherHeatherBasic } from "../../../../lib/chat/heather-basic-engine";
+import { DEFAULT_CHAT_EXECUTION_MODE, executionModeForStoredValue, isExecutionModeSelectorEnabled, parseChatExecutionMode } from "../../../../lib/chat/execution-mode";
 
 export const runtime = "nodejs";
 
@@ -30,6 +32,7 @@ type ResearchResponse = {
   userMessageId: string;
   assistantMessageId: string;
   duplicate?: boolean;
+  execution?: ChatExecutionMetadata;
 };
 
 type ProgressEmitter = (stage: HeatherProgressStage, status: ChatProgressStatus, extra?: Partial<ChatProgressEvent>) => void;
@@ -69,7 +72,8 @@ export async function POST(request: Request) {
           const data = await resolveResearchChat(request, payload, reporter);
           reporter("completed", "completed", { source_type: "research_analysis" });
           controller.enqueue(encoder.encode(encodeChatStreamEvent({ type: "content_delta", data: { text: data.message } })));
-          controller.enqueue(encoder.encode(encodeChatStreamEvent({ type: "done", data: { used_tools: data.provider === "agent-runtime" ? [data.model || "research discovery"] : [data.provider || "research llm"], duration_ms: Date.now() - startedAt, provider: data.provider, model: data.model, conversation_id: data.conversationId, title: data.title } })));
+          const durationMs = Date.now() - startedAt;
+          controller.enqueue(encoder.encode(encodeChatStreamEvent({ type: "done", data: { used_tools: data.provider === "agent-runtime" ? [data.model || "research discovery"] : [data.provider || "research llm"], duration_ms: durationMs, provider: data.provider, model: data.model, conversation_id: data.conversationId, title: data.title, execution: serializeExecution(data.execution || advancedExecution(data.provider), durationMs) } })));
         } catch (error) {
           if (isAbortError(error) || request.signal.aborted) reporter("cancelled", "cancelled", { source_type: "research_analysis" });
           else reporter("failed", "failed", { source_type: "research_analysis" });
@@ -93,15 +97,28 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
   try {
     emit?.("request_received", "active", { source_type: "research_analysis" });
     const conversations = new ConversationRepository();
+    const requestedExecutionMode = resolveRequestedExecutionMode(payload.executionMode);
+    const user = await requireContextUser(request);
     turn = payload.messageAlreadyPersisted && payload.conversationId
       ? await conversations.getStoredTurn({ conversationId: payload.conversationId, type: "research", clientMessageId })
-      : await conversations.beginMessage({ conversationId: payload.conversationId, type: "research", title: createConversationTitle(payload.message, "research"), content: payload.message, clientMessageId });
+      : await conversations.beginMessage({ conversationId: payload.conversationId, type: "research", title: createConversationTitle(payload.message, "research"), content: payload.message, clientMessageId, executionMode: requestedExecutionMode, ownerId: payload.conversationId ? undefined : user.user.id });
     emit?.("request_received", "completed", { source_type: "research_analysis" });
 
     if (turn.duplicate) {
       const previous = await conversations.findCompletedAssistant(turn.conversation.id, clientMessageId);
       if (previous) return completedResponse(previous.content, turn.conversation.title, "stored", "conversation-history", turn.conversation.id, turn.userMessage.id, previous.id, true);
       throw new Error("이 메시지는 이미 처리 중입니다. 잠시 후 대화를 다시 열어주세요.");
+    }
+
+    const executionMode = executionModeForStoredValue(turn.conversation.executionMode);
+    emit?.("execution_mode_check", "active", { source_type: "research_analysis" });
+    emit?.("execution_mode_check", "completed", { source_type: "research_analysis" });
+    if (executionMode === "HEATHER_BASIC") {
+      emit?.("local_engine_status", "active", { source_type: "research_analysis" });
+      const basic = executeResearcherHeatherBasic(payload.message);
+      emit?.("local_engine_status", "warning", { source_type: "research_analysis", detail: "로컬 엔진이 아직 연결되지 않았습니다." });
+      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: basic.message, source: "heather-basic", replyTo: clientMessageId, metadata: executionMetadata(basic.execution!) });
+      return completedResponse(basic.message, basic.title, "", "", turn.conversation.id, turn.userMessage.id, assistant.id, false, undefined, basic.execution);
     }
 
     emit?.("research_intent_analysis", "active", { source_type: "research_analysis" });
@@ -133,7 +150,7 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
       await directCommands.incrementUsage(directMatch.command.id);
       await directCommands.logIntent("direct_command", payload.message, directMatch.command.id);
       const message = formatResearchResponse(directMatch.command.response);
-      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: message, source: "direct_command", replyTo: clientMessageId, metadata: { provider: "direct-command" } });
+      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: message, source: "direct_command", replyTo: clientMessageId, metadata: { provider: "direct-command", ...executionMetadata(advancedExecution("direct-command")) } });
       emit?.("response_review", "completed", { source_type: "direct_command" });
       return completedResponse(message, directMatch.command.canonicalTrigger, "direct-command", "server", turn.conversation.id, turn.userMessage.id, assistant.id);
     }
@@ -156,7 +173,7 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
         content: message,
         source: "skill",
         replyTo: clientMessageId,
-        metadata: { provider: "agent-runtime", model: "research-discovery-unavailable", discovery_status: "no_verified_sources" }
+        metadata: { provider: "agent-runtime", model: "research-discovery-unavailable", discovery_status: "no_verified_sources", ...executionMetadata(advancedExecution("agent-runtime")) }
       });
       return completedResponse(message, generateConversationTitle(payload.message), "agent-runtime", "research-discovery-unavailable", turn.conversation.id, turn.userMessage.id, assistant.id);
     }
@@ -185,7 +202,7 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
         content: message,
         source: "nemotron",
         replyTo: clientMessageId,
-        metadata: { provider: response.provider, model: response.model, discovery_skill: skill.skillId }
+        metadata: { provider: response.provider, model: response.model, discovery_skill: skill.skillId, ...executionMetadata(advancedExecution(response.provider, true)) }
       });
       return completedResponse(message, generateConversationTitle(payload.message), response.provider, response.model, turn.conversation.id, turn.userMessage.id, assistant.id, false, evidence);
     }
@@ -198,7 +215,7 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
     emit?.("research_synthesis", "completed", { source_type: "llm", source_count: evidence.length, evidence_level: evidence.length ? "internal_record" : undefined });
     emitCandidateStatus(emit, payload.message);
     emit?.("response_review", "completed", { source_type: "llm" });
-    const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: message, source: "nemotron", replyTo: clientMessageId, metadata: { provider: response.provider, model: response.model } });
+    const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: message, source: "nemotron", replyTo: clientMessageId, metadata: { provider: response.provider, model: response.model, ...executionMetadata(advancedExecution(response.provider)) } });
     return completedResponse(message, generateConversationTitle(payload.message), response.provider, response.model, turn.conversation.id, turn.userMessage.id, assistant.id, false, evidence);
   } catch (error) {
     const message = userFacingResearchError(error);
@@ -224,8 +241,25 @@ function appendVerifiedSourceContext(messages: LlmMessage[], sources: RuntimeSou
   ];
 }
 
-function completedResponse(message: string, title: string, provider: string, model: string, conversationId: string, userMessageId: string, assistantMessageId: string, duplicate = false, evidence?: unknown): ResearchResponse {
-  return { message, title, risk: { level: "low", requiresConfirmation: false, reason: "Read-only research analysis." }, mode: "research", provider, model, evidence, conversationId, userMessageId, assistantMessageId, duplicate };
+function completedResponse(message: string, title: string, provider: string, model: string, conversationId: string, userMessageId: string, assistantMessageId: string, duplicate = false, evidence?: unknown, execution?: ChatExecutionMetadata): ResearchResponse {
+  return { message, title, risk: { level: "low", requiresConfirmation: false, reason: "Read-only research analysis." }, mode: "research", provider: provider || undefined, model: model || undefined, evidence, conversationId, userMessageId, assistantMessageId, duplicate, execution };
+}
+
+function resolveRequestedExecutionMode(value: unknown): ChatExecutionMode {
+  if (!isExecutionModeSelectorEnabled()) return DEFAULT_CHAT_EXECUTION_MODE;
+  return parseChatExecutionMode(value) || DEFAULT_CHAT_EXECUTION_MODE;
+}
+
+function advancedExecution(provider?: string, searchUsed = false): ChatExecutionMetadata {
+  return { requestedExecutionMode: "ADVANCED_REASONING", actualExecutionMode: "ADVANCED_REASONING", chatType: "research", localEngineUsed: false, externalLlmUsed: provider === "nvidia", searchUsed };
+}
+
+function executionMetadata(execution: ChatExecutionMetadata) {
+  return { requested_execution_mode: execution.requestedExecutionMode, actual_execution_mode: execution.actualExecutionMode, chat_type: execution.chatType, local_engine_used: execution.localEngineUsed, external_llm_used: execution.externalLlmUsed, error_code: execution.errorCode, search_used: execution.searchUsed, created_at: new Date().toISOString() };
+}
+
+function serializeExecution(execution: ChatExecutionMetadata, _durationMs: number) {
+  return { requested_execution_mode: execution.requestedExecutionMode, actual_execution_mode: execution.actualExecutionMode, chat_type: execution.chatType, local_engine_used: execution.localEngineUsed, external_llm_used: execution.externalLlmUsed, error_code: execution.errorCode, search_used: execution.searchUsed };
 }
 
 function createProgressReporter(requestId: string, plannedStages: HeatherProgressStage[], send: (event: ChatStreamEvent) => void): ProgressEmitter {

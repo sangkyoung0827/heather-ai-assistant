@@ -34,6 +34,8 @@ import { HeatherAvatar } from "../HeatherAvatar";
 import { ThinkingStatusPanel } from "../chat/ThinkingStatusPanel";
 import { readChatProgressStream, type ChatProgressEvent, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 import { createExplicitPersonalMemory, dedupeConsecutiveUserMessages, isRecentDuplicateSubmission, type RecentSubmission } from "../../../lib/chat/outgoing-message";
+import { DEFAULT_CHAT_EXECUTION_MODE, isExecutionModeSelectorEnabledInBrowser } from "../../../lib/chat/execution-mode";
+import { ExecutionBadge, ExecutionModeSelector } from "../chat/ExecutionModeSelector";
 
 interface ChatPanelProps {
   conversations: Conversation[];
@@ -108,6 +110,7 @@ export function ChatPanel({
   const [inputSource, setInputSource] = useState<"text" | "voice">("text");
   const [providerStatus, setProviderStatus] = useState("대기 중");
   const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
+  const [newConversationExecutionMode, setNewConversationExecutionMode] = useState<ChatRequestPayload["executionMode"]>(DEFAULT_CHAT_EXECUTION_MODE);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +182,7 @@ export function ChatPanel({
     await onSaveConversation(conversation);
     setActiveConversationId(conversation.id);
     setDraft("");
+    setNewConversationExecutionMode(DEFAULT_CHAT_EXECUTION_MODE);
   }
 
   async function handleDeleteConversation(id: string) {
@@ -204,10 +208,12 @@ export function ChatPanel({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const baseConversation = activeConversation || createConversation(message);
+    const executionMode = activeConversation?.executionMode || newConversationExecutionMode || DEFAULT_CHAT_EXECUTION_MODE;
+    const baseConversation = activeConversation || { ...createConversation(message), executionMode };
     const userMessage = createMessage("user", message, inputSource);
     const optimisticConversation: Conversation = {
       ...baseConversation,
+      executionMode,
       title: baseConversation.messages.length ? baseConversation.title : generateConversationTitle(message),
       messages: [...dedupeConsecutiveUserMessages(baseConversation.messages), userMessage],
       updatedAt: nowIso()
@@ -229,13 +235,14 @@ export function ChatPanel({
         projects,
         teachings,
         automationRecipes
+        ,executionMode
       };
       const data = await resolveHeatherResponse(payload, (event) => {
         if (event.type === "progress") setProgressEvents((current) => [...current, event.data]);
       }, controller.signal);
 
       const responseMessage = removeMarkdownEmphasis(data.message);
-      const assistantMessage = createMessage("assistant", responseMessage);
+      const assistantMessage = createMessage("assistant", responseMessage, "text", { provider: data.provider, model: data.model, execution: data.execution });
       const finalConversation: Conversation = {
         ...optimisticConversation,
         title:
@@ -317,12 +324,22 @@ export function ChatPanel({
     }
   }
 
+  async function changeExecutionMode(executionMode: NonNullable<ChatRequestPayload["executionMode"]>) {
+    if (isSending) return;
+    setNewConversationExecutionMode(executionMode);
+    if (!activeConversation) return;
+    const updatedAt = nowIso();
+    const updated = { ...activeConversation, executionMode, executionModeUpdatedAt: updatedAt, updatedAt };
+    await onSaveConversation(updated);
+    if (isPersistedConversationId(updated.id)) await conversationRepositoryRef.current.setExecutionMode(updated.id, executionMode);
+  }
+
   function handleStopResponse() {
     abortRef.current?.abort();
   }
 
   async function resolveHeatherResponse(payload: ChatRequestPayload, onEvent: (event: ChatStreamEvent) => void, signal: AbortSignal): Promise<ApiChatResponse> {
-    const cachedResponse = payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) && !isPersonalMemoCommand(payload.message) ? readCachedResponse(payload) : null;
+    const cachedResponse = payload.executionMode !== "HEATHER_BASIC" && payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) && !isPersonalMemoCommand(payload.message) ? readCachedResponse(payload) : null;
     if (cachedResponse) {
       onEvent({ type: "progress", data: createClientProgressEvent("request_received", "completed", 10) });
       onEvent({ type: "progress", data: createClientProgressEvent("response_composition", "completed", 92, "cache") });
@@ -353,17 +370,18 @@ export function ChatPanel({
     let model: string | undefined;
     let wasCached = false;
     let personalMemo: ApiChatResponse["personalMemo"];
+    let execution: ApiChatResponse["execution"];
     let streamError: string | undefined;
     await readChatProgressStream(response, (event) => {
       onEvent(event);
       if (event.type === "content_delta") message += event.data.text;
-      if (event.type === "done") { provider = event.data.provider; model = event.data.model; wasCached = Boolean(event.data.cached); personalMemo = event.data.personal_memo; }
+      if (event.type === "done") { provider = event.data.provider; model = event.data.model; wasCached = Boolean(event.data.cached); personalMemo = event.data.personal_memo; execution = event.data.execution ? { requestedExecutionMode: event.data.execution.requested_execution_mode, actualExecutionMode: event.data.execution.actual_execution_mode, chatType: event.data.execution.chat_type, localEngineUsed: event.data.execution.local_engine_used, externalLlmUsed: event.data.execution.external_llm_used, errorCode: event.data.execution.error_code, searchUsed: event.data.execution.search_used, durationMs: event.data.duration_ms } : undefined; }
       if (event.type === "error") streamError = event.data.user_message;
     });
     if (streamError || !message) throw new Error(streamError || "Heather chat request failed.");
-    const data: ApiChatResponse = { message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Text response." }, provider, model, cached: wasCached, personalMemo };
+    const data: ApiChatResponse = { message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Text response." }, provider, model, cached: wasCached, personalMemo, execution };
 
-    if (payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) && !isPersonalMemoCommand(payload.message)) {
+    if (payload.executionMode !== "HEATHER_BASIC" && payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) && !isPersonalMemoCommand(payload.message)) {
       writeCachedResponse(payload, data);
     }
 
@@ -527,6 +545,7 @@ export function ChatPanel({
                         minute: "2-digit"
                       })}
                     </div>
+                    {message.role === "assistant" ? <ExecutionBadge execution={message.execution} provider={message.provider} model={message.model} locale={settings.defaultLanguage} /> : null}
                   </div>
                 </article>
               ))}
@@ -543,6 +562,7 @@ export function ChatPanel({
         </div>
 
         <div className="chat-composer-wrap">
+          {isExecutionModeSelectorEnabledInBrowser() ? <ExecutionModeSelector value={activeConversation?.executionMode || newConversationExecutionMode || DEFAULT_CHAT_EXECUTION_MODE} chatType="general" locale={settings.defaultLanguage} disabled={isSending} onChange={(mode) => void changeExecutionMode(mode)} /> : null}
           <div className="chat-composer dm-composer">
             <button
               type="button"
@@ -707,6 +727,7 @@ function cacheKey(payload: ChatRequestPayload): string {
     message: payload.message.trim().toLowerCase(),
     tone: payload.settings.tone,
     aiMode: payload.settings.aiMode,
+    executionMode: payload.executionMode || DEFAULT_CHAT_EXECUTION_MODE,
     memories: payload.memories
       .filter((memory) => !memory.archived)
       .slice(0, 6)
@@ -737,6 +758,8 @@ function cacheKey(payload: ChatRequestPayload): string {
 
   return `heather.ai.chat-cache.${hashString(compact)}`;
 }
+
+function isPersistedConversationId(value: string) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
 
 function isQuickLinkCommand(message: string) {
   const action = /등록|추가|삭제|지워|제거|옮겨|이동|주소.*(?:바꿔|변경|수정)|링크.*(?:바꿔|변경|수정)|\b(add|register|delete|remove|move|update|rename|change)\b/i.test(message);

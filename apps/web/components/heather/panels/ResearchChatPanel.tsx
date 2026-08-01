@@ -4,17 +4,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FlaskConical, ImagePlus, MessageSquarePlus, Mic, MicOff, Paperclip, Search, Send, Smile, Trash2, X } from "lucide-react";
 import { createMessage } from "@heather/core";
-import type { ChatRequestPayload, HeatherSettings, MemoryRecord, MessageAttachment, ProjectRecord } from "@heather/core";
+import type { ChatExecutionMode, ChatRequestPayload, HeatherSettings, MemoryRecord, MessageAttachment, ProjectRecord } from "@heather/core";
 import { HeatherAvatar } from "../HeatherAvatar";
 import { useConversationStore } from "../../../lib/conversations/use-conversation-store";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 import { cleanResearchDisplayText } from "../../../lib/research/response";
 import { readChatProgressStream, type ChatProgressEvent, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 import { ThinkingStatusPanel } from "../chat/ThinkingStatusPanel";
+import { DEFAULT_CHAT_EXECUTION_MODE, isExecutionModeSelectorEnabledInBrowser } from "../../../lib/chat/execution-mode";
+import { ExecutionBadge, ExecutionModeSelector } from "../chat/ExecutionModeSelector";
 
 type ResearchResponse = { message?: string; title?: string; conversationId?: string; error?: string; provider?: string; model?: string };
 type UploadResponse = { conversationId?: string; attachments?: MessageAttachment[]; error?: string };
-type StreamDone = { conversationId?: string; title?: string; provider?: string; model?: string };
+type StreamDone = { conversationId?: string; title?: string; provider?: string; model?: string; execution?: { requested_execution_mode: ChatExecutionMode; actual_execution_mode: ChatExecutionMode; chat_type: "general" | "research"; local_engine_used: boolean; external_llm_used: boolean; error_code?: string; search_used?: boolean }; durationMs?: number };
 type DraftAttachment = { id: string; file: File; previewUrl: string };
 const EMOJIS = ["🧪", "🔬", "📊", "🧬", "⚗️", "💡", "✅", "📌"];
 type SpeechRecognitionResultLike = { transcript: string };
@@ -24,7 +26,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 type WindowWithSpeechRecognition = Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
 
 export function ResearchChatPanel({ memories, projects, settings }: { memories: MemoryRecord[]; projects: ProjectRecord[]; settings: HeatherSettings }) {
-  const { conversations, activeConversation, activeConversationId, loading, selectConversation, setNewConversation, refreshAfterSend, archiveConversation, applyOptimistic, searchConversations, loadMore, loadOlderMessages } = useConversationStore("research");
+  const { conversations, activeConversation, activeConversationId, loading, selectConversation, setNewConversation, refreshAfterSend, archiveConversation, setExecutionMode, applyOptimistic, searchConversations, loadMore, loadOlderMessages } = useConversationStore("research");
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
   const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
@@ -32,6 +34,7 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
   const [isListening, setIsListening] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
+  const [newConversationExecutionMode, setNewConversationExecutionMode] = useState<ChatExecutionMode>(DEFAULT_CHAT_EXECUTION_MODE);
   const lockRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -93,13 +96,14 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
       let conversationId = activeConversation?.id?.startsWith("pending-") ? undefined : activeConversation?.id;
       let messageAlreadyPersisted = false;
       if (files.length) {
-        const form = new FormData(); form.set("message", message); form.set("clientMessageId", userMessage.id); form.set("type", "research"); if (conversationId) form.set("conversationId", conversationId); files.forEach((file) => form.append("files", file));
+        const form = new FormData(); form.set("message", message); form.set("clientMessageId", userMessage.id); form.set("type", "research"); form.set("executionMode", activeConversation?.executionMode || newConversationExecutionMode); if (conversationId) form.set("conversationId", conversationId); files.forEach((file) => form.append("files", file));
         const upload = await fetch("/api/conversations/media", { method: "POST", body: form });
         const uploaded = await upload.json() as UploadResponse;
         if (!upload.ok || !uploaded.conversationId) throw new Error(uploaded.error || copy.uploadFailed);
         conversationId = uploaded.conversationId; messageAlreadyPersisted = true;
       }
-      const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId, conversation: activeConversation || undefined, messageAlreadyPersisted, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [] };
+      const executionMode = activeConversation?.executionMode || newConversationExecutionMode;
+      const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId, conversation: activeConversation || undefined, messageAlreadyPersisted, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [], executionMode };
       const session = await getSupabaseBrowserClient()?.auth.getSession();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (session?.data.session?.access_token) headers.Authorization = `Bearer ${session.data.session.access_token}`;
@@ -114,11 +118,11 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
       await readChatProgressStream(response, (event: ChatStreamEvent) => {
         if (event.type === "progress") setProgressEvents((current) => [...current, event.data].slice(-40));
         if (event.type === "content_delta") responseMessage += event.data.text;
-        if (event.type === "done") done = { conversationId: event.data.conversation_id, title: event.data.title, provider: event.data.provider, model: event.data.model };
+        if (event.type === "done") done = { conversationId: event.data.conversation_id, title: event.data.title, provider: event.data.provider, model: event.data.model, execution: event.data.execution, durationMs: event.data.duration_ms };
         if (event.type === "error") streamError = event.data.user_message;
       });
       if (streamError || !responseMessage || !done.conversationId) throw new Error(streamError || copy.sendFailed);
-      applyOptimistic(createMessage("assistant", responseMessage, "text", { provider: done.provider || "nvidia", model: done.model }));
+      applyOptimistic(createMessage("assistant", responseMessage, "text", { provider: done.provider, model: done.model, execution: done.execution ? { requestedExecutionMode: done.execution.requested_execution_mode, actualExecutionMode: done.execution.actual_execution_mode, chatType: done.execution.chat_type, localEngineUsed: done.execution.local_engine_used, externalLlmUsed: done.execution.external_llm_used, errorCode: done.execution.error_code, searchUsed: done.execution.search_used, durationMs: done.durationMs } : undefined }));
       await refreshAfterSend(done.conversationId);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -127,6 +131,12 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
         applyOptimistic({ ...createMessage("assistant", `${copy.failed} ${error instanceof Error ? error.message : copy.retry}`), status: "failed" });
       }
     } finally { abortRef.current = null; lockRef.current = false; setIsSending(false); }
+  }
+
+  async function changeExecutionMode(executionMode: ChatExecutionMode) {
+    if (isSending) return;
+    setNewConversationExecutionMode(executionMode);
+    if (activeConversation?.id && !activeConversation.id.startsWith("pending-")) await setExecutionMode(activeConversation.id, executionMode);
   }
 
   return <div className="research-chat-shell" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }}>
@@ -138,13 +148,13 @@ export function ResearchChatPanel({ memories, projects, settings }: { memories: 
     <section className="research-chat-main">
       <header className="research-chat-header"><div><span className="research-header-badge"><FlaskConical />{copy.researcher}</span><h2>{activeConversation?.title || copy.newResearch}</h2></div><HeatherAvatar settings={settings} size="medium" researcher /></header>
       <div ref={messageAreaRef} className="research-message-area heather-scrollbar">{activeConversation?.messages.length ? <><button type="button" className="research-load-more" onClick={() => void loadOlderMessages()}>{copy.loadOlder}</button><div className="research-thread">{activeConversation.messages.map((message) => <ResearchMessage key={message.id} message={message} settings={settings} onRetry={() => setDraft(message.content)} />)}</div></> : <ResearchWelcome settings={settings} copy={copy} onPrompt={setDraft} />}{progressEvents.length ? <ThinkingStatusPanel events={progressEvents} isRunning={isSending} locale={locale} mode="research" onCancel={() => abortRef.current?.abort()} /> : null}</div>
-      <footer className="research-composer-wrap">{attachments.length ? <div className="research-attachment-strip">{attachments.map((attachment) => <div key={attachment.id}><img src={attachment.previewUrl} alt="" /><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={copy.removePhoto}><X /></button></div>)}</div> : null}<div className="research-composer"><span className="research-emoji-wrap"><button type="button" onClick={() => setShowEmoji((open) => !open)} aria-label={copy.emoji} title={copy.emoji}><Smile /></button>{showEmoji ? <span className="research-emoji-picker">{EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</span> : null}</span><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.photos} title={copy.photos}><ImagePlus /></button><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.file} title={copy.file}><Paperclip /></button><input ref={imageInputRef} className="dm-hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} /><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); addFiles(event.clipboardData.files); } }} placeholder={copy.placeholder} rows={1} /><button type="button" onClick={toggleListening} className={isListening ? "is-listening" : ""} aria-label={isListening ? copy.stopListening : copy.voiceInput} title={isListening ? copy.stopListening : copy.voiceInput}>{isListening ? <MicOff /> : <Mic />}</button><button type="button" onClick={() => void send()} disabled={(!draft.trim() && !attachments.length) || isSending} className="research-send" aria-label={copy.send}>{isSending ? <span aria-hidden="true">...</span> : <Send />}</button></div></footer>
+      <footer className="research-composer-wrap">{attachments.length ? <div className="research-attachment-strip">{attachments.map((attachment) => <div key={attachment.id}><img src={attachment.previewUrl} alt="" /><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={copy.removePhoto}><X /></button></div>)}</div> : null}{isExecutionModeSelectorEnabledInBrowser() ? <ExecutionModeSelector value={activeConversation?.executionMode || newConversationExecutionMode} chatType="research" locale={locale} disabled={isSending} onChange={(mode) => void changeExecutionMode(mode)} /> : null}<div className="research-composer"><span className="research-emoji-wrap"><button type="button" onClick={() => setShowEmoji((open) => !open)} aria-label={copy.emoji} title={copy.emoji}><Smile /></button>{showEmoji ? <span className="research-emoji-picker">{EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</span> : null}</span><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.photos} title={copy.photos}><ImagePlus /></button><button type="button" onClick={() => imageInputRef.current?.click()} aria-label={copy.file} title={copy.file}><Paperclip /></button><input ref={imageInputRef} className="dm-hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { addFiles(event.target.files || []); event.currentTarget.value = ""; }} /><textarea ref={textareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); addFiles(event.clipboardData.files); } }} placeholder={copy.placeholder} rows={1} /><button type="button" onClick={toggleListening} className={isListening ? "is-listening" : ""} aria-label={isListening ? copy.stopListening : copy.voiceInput} title={isListening ? copy.stopListening : copy.voiceInput}>{isListening ? <MicOff /> : <Mic />}</button><button type="button" onClick={() => void send()} disabled={(!draft.trim() && !attachments.length) || isSending} className="research-send" aria-label={copy.send}>{isSending ? <span aria-hidden="true">...</span> : <Send />}</button></div></footer>
     </section>
   </div>;
 }
 
 function ResearchWelcome({ settings, copy, onPrompt }: { settings: HeatherSettings; copy: typeof KO; onPrompt: (value: string) => void }) { return <div className="research-welcome"><div className="research-welcome-avatar"><HeatherAvatar settings={settings} size="large" researcher /><FlaskConical /></div><h2>Heather Researcher</h2><span>{copy.welcome}</span><div>{copy.prompts.map((prompt) => <button key={prompt} type="button" onClick={() => onPrompt(prompt)}>{prompt}</button>)}</div></div>; }
-function ResearchMessage({ message, settings, onRetry }: { message: { role: string; content: string; status?: string; attachments?: MessageAttachment[] }; settings: HeatherSettings; onRetry: () => void }) { const isUser = message.role === "user"; return <article className={`research-message ${isUser ? "is-user" : "is-heather"}`}>{!isUser ? <HeatherAvatar settings={settings} size="small" researcher /> : null}<div>{message.attachments?.length ? <div className="research-image-grid">{message.attachments.map((attachment) => attachment.url ? <img key={attachment.id} src={attachment.url} alt="" /> : null)}</div> : null}{message.content ? <div className="research-message-content">{renderResearchContent(message.content)}</div> : null}{message.status === "failed" ? <button type="button" className="research-retry" onClick={onRetry}>다시 시도</button> : null}</div></article>; }
+function ResearchMessage({ message, settings, onRetry }: { message: { role: string; content: string; status?: string; attachments?: MessageAttachment[]; provider?: string; model?: string; execution?: { actualExecutionMode: ChatExecutionMode; localEngineUsed: boolean; externalLlmUsed: boolean; errorCode?: string; durationMs?: number; searchUsed?: boolean } }; settings: HeatherSettings; onRetry: () => void }) { const isUser = message.role === "user"; return <article className={`research-message ${isUser ? "is-user" : "is-heather"}`}>{!isUser ? <HeatherAvatar settings={settings} size="small" researcher /> : null}<div>{message.attachments?.length ? <div className="research-image-grid">{message.attachments.map((attachment) => attachment.url ? <img key={attachment.id} src={attachment.url} alt="" /> : null)}</div> : null}{message.content ? <div className="research-message-content">{renderResearchContent(message.content)}</div> : null}{!isUser ? <ExecutionBadge execution={message.execution} provider={message.provider} model={message.model} locale={settings.defaultLanguage} /> : null}{message.status === "failed" ? <button type="button" className="research-retry" onClick={onRetry}>다시 시도</button> : null}</div></article>; }
 function renderResearchContent(content: string) { return cleanResearchDisplayText(content).split(/\n{2,}/).map((block, index) => { const section = block.match(/^(핵심 결론|근거|한계|권장 후속 조치|출처|Key conclusion|Evidence|Limitations|Recommended next steps|Sources)\s*:\s*([\s\S]*)$/i); return section ? <section key={index} className="research-report-section"><strong>{section[1]}</strong><p>{section[2]}</p></section> : <p key={index}>{block}</p>; }); }
 function createClientProgressEvent(stage: ChatProgressEvent["stage"], status: ChatProgressEvent["status"], progress: number): ChatProgressEvent { const now = new Date().toISOString(); return { id: `client:${stage}:${now}`, request_id: "client-cancel", stage, status, progress, source_type: "research_analysis", started_at: now, completed_at: now, duration_ms: 0 }; }
 function formatDate(value: string, locale: "ko" | "en") { return new Intl.DateTimeFormat(locale === "ko" ? "ko-KR" : "en-US", { month: "short", day: "numeric" }).format(new Date(value)); }
