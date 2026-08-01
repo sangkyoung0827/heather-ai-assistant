@@ -1,24 +1,32 @@
 import type { MemoryRecord } from "@heather/core";
 import { ContextControlError, type ContextClient } from "../context-control/server";
+import { reprocessStoredDocument } from "../documents/server";
 
 export type PersonalMemoryScope = "all" | "journal" | "direct" | "project";
 export type PersonalMemoryScopeCounts = Record<PersonalMemoryScope, number>;
 
 export async function getPersonalMemoryScopeData(context: ContextClient, scope: PersonalMemoryScope, query: string) {
-  const [personal, documentBackedPersonal, journals, projects, projectMemories, operationalRecords] = await Promise.all([
+  const [personal, documents, projects, projectMemories, operationalRecords] = await Promise.all([
     context.client.from("personal_memories").select("id,content,memory_type,tags,metadata,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).eq("archived", false).order("updated_at", { ascending: false }).limit(1000),
-    context.client.from("personal_memories").select("id", { count: "exact", head: true }).eq("user_id", context.user.id).eq("archived", false).contains("metadata", { source: "document_ingestion" }),
-    context.client.from("documents").select("id,title,source_date,document_type,uploaded_at,document_extractions(extracted_text,status)", { count: "exact" }).eq("user_id", context.user.id).eq("memory_scope", "personal").is("deleted_at", null).in("parsing_status", ["completed", "needs_review"]).order("source_date", { ascending: false }).limit(1000),
+    context.client.from("documents").select("id,title,source_date,document_type,uploaded_at,original_filename,mime_type,extension,storage_path,parsing_status", { count: "exact" }).eq("user_id", context.user.id).eq("memory_scope", "personal").is("deleted_at", null).order("uploaded_at", { ascending: false }).limit(1000),
     context.client.from("context_projects").select("id,name,status,created_at,updated_at", { count: "exact" }).eq("owner_user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("project_context_memories").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("operational_contexts").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000)
   ]);
-  // Project-context migrations are optional for personal journal and direct
-  // memory search. A missing project table must not hide uploaded documents.
-  const failure = [personal, documentBackedPersonal, journals].find((result) => result.error)?.error;
-  if (failure) throw new ContextControlError("Personal memory search needs the latest Heather database migration.", 503);
-
-  const uploadedDocuments = journals.data || [];
+  if (personal.error) throw new ContextControlError("Personal memory search is temporarily unavailable.", 503);
+  const storedDocuments = documents.error ? [] : documents.data || [];
+  // Retry older legacy HWP uploads after the parser upgrade. Only the signed-in
+  // user's unfinished HWP files are read from private storage.
+  await Promise.all(storedDocuments.filter((document) => document.extension === "hwp" && !["completed", "needs_review"].includes(String(document.parsing_status))).slice(0, 5).map((document) => reprocessStoredDocument(context, document)));
+  const documentIds = storedDocuments.map((document) => String(document.id));
+  const extractions = documentIds.length
+    ? await context.client.from("document_extractions").select("document_id,extracted_text,status").in("document_id", documentIds)
+    : { data: [], error: null };
+  const extractionByDocument = new Map((extractions.error ? [] : extractions.data || []).map((row) => [String(row.document_id), row]));
+  const uploadedDocuments = storedDocuments.map((document) => {
+    const extraction = extractionByDocument.get(String(document.id));
+    return { ...document, document_extractions: extraction ? [extraction] : [] };
+  });
   const direct = [
     ...(personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).map((row) => toDirectMemory(row)),
     ...uploadedDocuments.filter((row) => row.document_type !== "journal").map((row) => toUploadedDocumentMemory(row))
@@ -29,7 +37,7 @@ export async function getPersonalMemoryScopeData(context: ContextClient, scope: 
     ...(projectMemories.error ? [] : projectMemories.data || []).map((row) => toProjectRecordMemory(row, "project_context")),
     ...(operationalRecords.error ? [] : operationalRecords.data || []).map((row) => toProjectRecordMemory(row, "operational_record"))
   ];
-  const directCount = Math.max(0, (personal.count || 0) - (documentBackedPersonal.count || 0)) + uploadedDocuments.filter((row) => row.document_type !== "journal").length;
+  const directCount = (personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).length + uploadedDocuments.filter((row) => row.document_type !== "journal").length;
   const journalCount = journal.length;
   const projectCount = (projects.error ? 0 : projects.count || 0) + (projectMemories.error ? 0 : projectMemories.count || 0) + (operationalRecords.error ? 0 : operationalRecords.count || 0);
   const counts: PersonalMemoryScopeCounts = { all: directCount + journalCount + projectCount, journal: journalCount, direct: directCount, project: projectCount };
@@ -49,16 +57,18 @@ function toDirectMemory(row: { id: string; content: string; memory_type: string;
   return { id: String(row.id), type: String(row.memory_type || "important_fact") as MemoryRecord["type"], content: String(row.content), source: "personal", confidence: .72, tags: Array.isArray(row.tags) ? row.tags.map(String) : [], created_at: String(row.created_at), updated_at: String(row.updated_at), archived: false };
 }
 
-function toJournalMemory(row: { id: string; title: string; source_date: string | null; uploaded_at: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
+function toJournalMemory(row: { id: string; title: string; source_date: string | null; uploaded_at: string; parsing_status: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
   const extraction = row.document_extractions?.[0];
   const date = row.source_date || row.uploaded_at;
-  return { id: `journal-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || "This journal document has no readable text yet.").slice(0, 4000), source: `journal · ${row.title}${row.source_date ? ` · ${row.source_date}` : " · undated"}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["journal", "document", "direct_record"], created_at: date, updated_at: date, archived: false };
+  return { id: `journal-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || pendingDocumentText(row.title, row.parsing_status)).slice(0, 4000), source: `journal · ${row.title}${row.source_date ? ` · ${row.source_date}` : " · undated"}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["journal", "document", "direct_record"], created_at: date, updated_at: date, archived: false };
 }
 
-function toUploadedDocumentMemory(row: { id: string; title: string; document_type: string; uploaded_at: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
+function toUploadedDocumentMemory(row: { id: string; title: string; document_type: string; uploaded_at: string; parsing_status: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
   const extraction = row.document_extractions?.[0];
-  return { id: `direct-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || "This uploaded document has no readable text yet.").slice(0, 4000), source: `direct note · ${row.title}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["document", String(row.document_type), "direct_record"], created_at: String(row.uploaded_at), updated_at: String(row.uploaded_at), archived: false };
+  return { id: `direct-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || pendingDocumentText(row.title, row.parsing_status)).slice(0, 4000), source: `direct note · ${row.title}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["document", String(row.document_type), "direct_record"], created_at: String(row.uploaded_at), updated_at: String(row.uploaded_at), archived: false };
 }
+
+function pendingDocumentText(title: string, status: string) { return `등록된 파일: ${title}\n파일 텍스트를 추출하는 중입니다. 추출이 끝나면 Heather 개인 채팅에서 이 기록을 근거로 답변합니다.${status === "failed" || status === "unsupported" ? " 현재 파일 형식을 다시 확인하고 있습니다." : ""}`; }
 
 function toProjectCreationMemory(row: { id: string; name: string; status: string; created_at: string; updated_at: string }): MemoryRecord {
   return { id: `project-creation-${row.id}`, type: "project_context", content: `Project created: ${row.name}. Current status: ${row.status}.`, source: "project record · creation", confidence: 1, tags: ["project", "project_creation", "direct_record"], created_at: String(row.created_at), updated_at: String(row.updated_at), archived: false };

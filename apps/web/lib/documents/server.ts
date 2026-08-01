@@ -157,7 +157,7 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
     .map(({ score: _score, ...memory }) => memory);
 }
 
-async function reprocessStoredDocument(context: DocumentContext, document: { id: string; original_filename: string; mime_type: string; extension: string; storage_path: string }) {
+export async function reprocessStoredDocument(context: DocumentContext, document: { id: string; original_filename: string; mime_type: string; extension: string; storage_path: string }) {
   try {
     const downloaded = await context.client.storage.from("documents").download(String(document.storage_path));
     if (downloaded.error || !downloaded.data) return;
