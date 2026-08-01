@@ -17,7 +17,7 @@ export async function getPersonalMemoryScopeData(context: ContextClient, scope: 
   const storedDocuments = documents.error ? [] : documents.data || [];
   // Retry older legacy HWP uploads after the parser upgrade. Only the signed-in
   // user's unfinished HWP files are read from private storage.
-  await Promise.all(storedDocuments.filter((document) => document.extension === "hwp" && !["completed", "needs_review"].includes(String(document.parsing_status))).slice(0, 5).map((document) => reprocessStoredDocument(context, document)));
+  await Promise.all(storedDocuments.filter((document) => document.extension === "hwp" && String(document.parsing_status) !== "completed").slice(0, 5).map((document) => reprocessStoredDocument(context, document)));
   const documentIds = storedDocuments.map((document) => String(document.id));
   const extractions = documentIds.length
     ? await context.client.from("document_extractions").select("document_id,extracted_text,status").in("document_id", documentIds)
@@ -60,15 +60,15 @@ function toDirectMemory(row: { id: string; content: string; memory_type: string;
 function toJournalMemory(row: { id: string; title: string; source_date: string | null; uploaded_at: string; parsing_status: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
   const extraction = row.document_extractions?.[0];
   const date = row.source_date || row.uploaded_at;
-  return { id: `journal-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || pendingDocumentText(row.title, row.parsing_status)).slice(0, 4000), source: `journal · ${row.title}${row.source_date ? ` · ${row.source_date}` : " · undated"}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["journal", "document", "direct_record"], created_at: date, updated_at: date, archived: false };
+  return { id: `journal-document-${row.id}`, type: "important_fact", content: fileRecordText(row.title, extraction?.status || row.parsing_status), source: `journal file · ${row.title}${row.source_date ? ` · ${row.source_date}` : " · undated"}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["journal", "document", "direct_record"], created_at: date, updated_at: date, archived: false };
 }
 
 function toUploadedDocumentMemory(row: { id: string; title: string; document_type: string; uploaded_at: string; parsing_status: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {
   const extraction = row.document_extractions?.[0];
-  return { id: `direct-document-${row.id}`, type: "important_fact", content: String(extraction?.extracted_text || pendingDocumentText(row.title, row.parsing_status)).slice(0, 4000), source: `direct note · ${row.title}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["document", String(row.document_type), "direct_record"], created_at: String(row.uploaded_at), updated_at: String(row.uploaded_at), archived: false };
+  return { id: `direct-document-${row.id}`, type: "important_fact", content: fileRecordText(row.title, extraction?.status || row.parsing_status), source: `personal file · ${row.title}`, confidence: extraction?.status === "completed" ? .9 : .55, tags: ["document", String(row.document_type), "direct_record"], created_at: String(row.uploaded_at), updated_at: String(row.uploaded_at), archived: false };
 }
 
-function pendingDocumentText(title: string, status: string) { return `등록된 파일: ${title}\n파일 텍스트를 추출하는 중입니다. 추출이 끝나면 Heather 개인 채팅에서 이 기록을 근거로 답변합니다.${status === "failed" || status === "unsupported" ? " 현재 파일 형식을 다시 확인하고 있습니다." : ""}`; }
+function fileRecordText(title: string, status: string) { return `파일: ${title}\n${status === "completed" || status === "needs_review" ? "원본은 안전하게 보관되며, Heather는 개인 채팅에서 필요한 부분만 읽습니다." : "원본은 안전하게 보관되며, Heather가 읽을 수 있도록 자동 추출을 다시 시도하고 있습니다."}`; }
 
 function toProjectCreationMemory(row: { id: string; name: string; status: string; created_at: string; updated_at: string }): MemoryRecord {
   return { id: `project-creation-${row.id}`, type: "project_context", content: `Project created: ${row.name}. Current status: ${row.status}.`, source: "project record · creation", confidence: 1, tags: ["project", "project_creation", "direct_record"], created_at: String(row.created_at), updated_at: String(row.updated_at), archived: false };

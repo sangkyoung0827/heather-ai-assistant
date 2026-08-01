@@ -302,3 +302,4 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @keyframes heather-dash { to { stroke-dashoffset: -10; } }
 @keyframes heather-candidate-shift { 50% { transform: translate(2px,-2px); } }
 @media (prefers-reduced-motion: reduce) { .heather-orbital-research-nodes, .heather-orbital-research-nodes circle, .heather-orbital-research-nodes path { animation: none !important; } }
+.simple-memory-document { display: flex; align-items: center; gap: 10px; min-width: 0; color: #dfe1e9; }.simple-memory-document > svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--os-accent); }.simple-memory-document > span { display: grid; min-width: 0; gap: 3px; }.simple-memory-document strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }.simple-memory-document small { color: var(--os-muted); font-size: 11px; }

@@ -111,15 +111,18 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
     .limit(100);
   if (candidateError || !candidates?.length) return [];
 
-  // A legacy HWP uploaded before the parser upgrade may have been preserved
-  // without chunks. Reprocess only a file whose title matches this request.
-  const titleMatches = (candidates || []).filter((document) => {
-    const title = `${document.title} ${document.original_filename}`.toLocaleLowerCase();
-    return !["completed", "needs_review"].includes(String(document.parsing_status)) && terms.some((term) => title.includes(term));
-  }).slice(0, 1);
-  await Promise.all(titleMatches.map((document) => reprocessStoredDocument(context, document)));
+  const explicitDocumentRequest = /\b(my (?:document|file|journal|diary)|uploaded (?:document|file))\b|개인\s*메모리|내\s*(?:파일|문서|일기)|업로드(?:한|한\s*파일|한\s*문서)|일기(?:를|의|파일)?/.test(message.toLocaleLowerCase());
+  // Legacy HWP files are re-read from the private original automatically when
+  // the user asks about their documents. The original is never converted in
+  // place or replaced; extraction is only a searchable reading index.
+  const documentsToReprocess = (candidates || []).filter((document) => {
+    if (String(document.parsing_status) === "completed") return false;
+    const label = `${document.title} ${document.original_filename} ${document.document_type}`.toLocaleLowerCase();
+    return explicitDocumentRequest || terms.some((term) => label.includes(term));
+  }).slice(0, 5);
+  await Promise.all(documentsToReprocess.map((document) => reprocessStoredDocument(context, document)));
 
-  const documents = (candidates || []).filter((document) => ["completed", "needs_review"].includes(String(document.parsing_status)) || titleMatches.some((match) => String(match.id) === String(document.id)));
+  const documents = (candidates || []).filter((document) => String(document.parsing_status) === "completed" || documentsToReprocess.some((match) => String(match.id) === String(document.id)));
   if (!documents.length) return [];
 
   const documentIds = documents.map((document) => String(document.id));
@@ -134,7 +137,7 @@ export async function retrieveDocumentMemoryContext(context: DocumentContext, sc
     .map((chunk) => {
       const document = documentById.get(String(chunk.document_id));
       if (!document) return null;
-      const haystack = `${document.title} ${chunk.content}`.toLocaleLowerCase();
+      const haystack = `${document.title} ${document.original_filename} ${document.document_type} ${chunk.content}`.toLocaleLowerCase();
       const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
       if (!score) return null;
       const location = [chunk.section_title, chunk.page_start ? `p.${chunk.page_start}${chunk.page_end && chunk.page_end !== chunk.page_start ? `-${chunk.page_end}` : ""}` : null].filter(Boolean).join(" · ");
@@ -239,5 +242,5 @@ function safeFilename(value: string) { return value.replace(/[^A-Za-z0-9._-]+/g,
 function titleFromFilename(value: string) { return value.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 300) || "Untitled document"; }
 function contentTypeFor(extension: string) { return ({ txt: "text/plain", md: "text/markdown", pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", hwpx: "application/zip", hwp: "application/x-hwp", rtf: "application/rtf", odt: "application/vnd.oasis.opendocument.text", csv: "text/csv", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation" })[extension] || "application/octet-stream"; }
 function wordCount(value: string) { return value ? value.split(/\s+/).filter(Boolean).length : 0; }
-function chunkText(value: string) { const normalized = value.trim(); if (!normalized) return []; const output: string[] = []; for (let index = 0; index < normalized.length; index += 1800) output.push(normalized.slice(index, index + 1800)); return output.slice(0, 100); }
+function chunkText(value: string) { const normalized = value.trim(); if (!normalized) return []; const output: string[] = []; for (let index = 0; index < normalized.length; index += 1800) output.push(normalized.slice(index, index + 1800)); return output; }
 function inferDateFromText(value: string) { const match = value.match(/(20\d{2})[.\-/년\s]+(0?[1-9]|1[0-2])[.\-/월\s]+([0-3]?\d)/); return match ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}` : null; }

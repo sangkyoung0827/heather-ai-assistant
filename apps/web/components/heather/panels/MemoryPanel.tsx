@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Loader2, Search, Trash2, X } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, Search, Trash2, X } from "lucide-react";
 import { createId, nowIso } from "@heather/core";
 import type { HeatherLanguage, MemoryRecord } from "@heather/core";
 import { DocumentIngestionPanel } from "./DocumentIngestionPanel";
@@ -149,7 +149,8 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
   if (auth && !auth.ready) return <section className="memory-auth-gate"><div><p>로그인 상태를 확인하는 중입니다.</p></div></section>;
   if (auth && !auth.user) return <MemoryAuthGate copy={copy} auth={auth} />;
 
-  const isReadOnlySelected = !isResearch && Boolean(selected && selected.source !== "personal");
+  const selectedIsDocument = Boolean(selected && isDocumentMemory(selected));
+  const isReadOnlySelected = !isResearch && Boolean(selected && (selected.source !== "personal" || selectedIsDocument));
   const visibleTotal = !isResearch && scopeData ? scopeData.counts[scope] : scopedMemories.length;
 
   return <div className={`memory-workspace simple-memory-workspace ${mobileView === "editor" ? "is-mobile-editor" : "is-mobile-list"}`}>
@@ -158,14 +159,14 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
       <form className="simple-memory-search" onSubmit={(event) => { event.preventDefault(); applySearch(); }}><Search /><input value={draftQuery} onChange={(event) => setDraftQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /><button type="submit" className="sr-only">{copy.search}</button></form>
       {!isResearch ? <><PersonalMemoryScopeBar scope={scope} counts={scopeData?.counts || null} locale={resolvedLocale} onChange={changeScope} />{appliedQuery && scopeData ? <p className="personal-memory-search-result-count">{searchResultLabel(scopeData.searchCount, resolvedLocale)}</p> : null}{scopeError ? <p className="personal-memory-scope-error" role="status">{scopeError}</p> : null}</> : null}
       <div className="memory-list heather-scrollbar simple-memory-items">
-        {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}><span className="simple-memory-content">{memory.content}</span><time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
+        {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}>{isDocumentMemory(memory) ? <DocumentMemoryRow memory={memory} locale={resolvedLocale} /> : <span className="simple-memory-content">{memory.content}</span>}<time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
         {renderedMemories.length < filteredMemories.length ? <button type="button" className="simple-memory-more" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)}>{copy.loadMore}</button> : null}
       </div>
     </aside>
     <section className="memory-editor simple-memory-editor">
       {!isResearch ? <DocumentIngestionPanel scope="personal" locale={resolvedLocale} onRecordsChanged={loadPersonalScope} /> : null}
       <header className="simple-memory-editor-header"><button type="button" className="simple-memory-back" onClick={() => setMobileView("list")} aria-label={copy.back}><ArrowLeft /></button><div><h2>{selected ? copy.edit : copy.newMemory}</h2><p>{isReadOnlySelected ? (resolvedLocale === "en" ? "This source record is read-only." : "이 원본 기록은 읽기 전용입니다.") : copy.editorHint}</p></div><button type="button" className="simple-memory-new" onClick={startNewMemory} aria-label={copy.newMemory} title={copy.newMemory}>+</button></header>
-      <label className="simple-memory-field"><span>{copy.content}</span><textarea value={content} readOnly={isReadOnlySelected} maxLength={isResearch ? 20000 : 10000} onChange={(event) => setContent(event.target.value)} placeholder={copy.placeholder} /></label>
+      <label className="simple-memory-field"><span>{selectedIsDocument ? (resolvedLocale === "en" ? "File record" : "파일 기록") : copy.content}</span><textarea value={content} readOnly={isReadOnlySelected} maxLength={isResearch ? 20000 : 10000} onChange={(event) => setContent(event.target.value)} placeholder={copy.placeholder} /></label>
       <div className="simple-memory-editor-footer"><small>{content.length.toLocaleString()} / {(isResearch ? 20000 : 10000).toLocaleString()}</small><div>{selected && !isReadOnlySelected ? <button type="button" className="simple-memory-delete" disabled={saving} onClick={() => setConfirmDelete(true)}><Trash2 />{copy.delete}</button> : null}{!isReadOnlySelected ? <button type="button" className="simple-memory-save" disabled={!content.trim() || saving} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : null}{saving ? copy.saving : copy.save}</button> : null}</div></div>
       {error ? <p className="simple-memory-error" role="alert">{error}</p> : null}
     </section>
@@ -174,11 +175,17 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
 }
 
 function MemoryEmpty({ query, copy }: { query: boolean; copy: Copy }) { return <div className="simple-memory-empty"><strong>{query ? copy.noResults : copy.emptyTitle}</strong><p>{query ? "" : copy.emptyDescription}</p></div>; }
+function DocumentMemoryRow({ memory, locale }: { memory: MemoryRecord; locale: HeatherLanguage }) {
+  const title = memory.source.split(" · ").slice(1, -1).join(" · ") || memory.source.replace(/^(journal file|personal file) · /, "");
+  const status = locale === "en" ? "Original file · ready for chat reading" : "원본 파일 · 개인 채팅에서 읽기 가능";
+  return <span className="simple-memory-document"><FileText aria-hidden="true" /><span><strong>{title}</strong><small>{status}</small></span></span>;
+}
 function MemoryAuthGate({ copy, auth }: { copy: Copy; auth: NonNullable<MemoryPanelProps["auth"]> }) { return <section className="memory-auth-gate"><div><h2>{copy.signInTitle}</h2><p>{auth.configured ? copy.signInDescription : copy.notConfigured}</p>{auth.configured ? <button type="button" onClick={() => void auth.signInWithGoogle()}>{copy.continueGoogle}</button> : null}</div></section>; }
 
 function DeleteDialog({ copy, onCancel, onDelete, loading }: { copy: Copy; onCancel: () => void; onDelete: () => void; loading: boolean }) { return <div className="simple-memory-modal-backdrop" role="presentation"><section className="simple-memory-modal" role="dialog" aria-modal="true" aria-labelledby="memory-delete-title"><button type="button" className="simple-memory-modal-close" onClick={onCancel} aria-label={copy.cancel}><X /></button><h2 id="memory-delete-title">{copy.deleteTitle}</h2><p>{copy.deleteDescription}</p><footer><button type="button" className="simple-memory-delete" onClick={onCancel}>{copy.cancel}</button><button type="button" className="simple-memory-save is-danger" onClick={onDelete} disabled={loading}>{loading ? <Loader2 className="animate-spin" /> : null}{copy.delete}</button></footer></section></div>; }
 
 function inScope(memory: MemoryRecord, variant: "personal" | "research") { return variant === "research" ? memory.type === "project_context" || memory.source.startsWith("research") : memory.type !== "project_context" && !memory.source.startsWith("research"); }
+function isDocumentMemory(memory: MemoryRecord) { return /^(journal|direct)-document-/.test(memory.id); }
 function searchableMemory(memory: MemoryRecord) { return `${memory.content} ${memory.source} ${memory.tags.join(" ")} ${memory.type}`.toLocaleLowerCase(); }
 function formatDate(value: string, locale: HeatherLanguage) { return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "ko-KR", { year: "numeric", month: "numeric", day: "numeric" }).format(new Date(value)); }
 function countLabel(count: number, locale: HeatherLanguage) { return locale === "en" ? `${count} ${count === 1 ? "memory" : "memories"}` : `${count}개`; }

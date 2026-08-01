@@ -115,7 +115,7 @@ const KO: ProgressCopy = {
   response_composition: "답변을 구성하고 있습니다.",
   response_review: "최종 내용을 정리하고 있습니다.",
   completed: "답변 준비가 완료되었습니다.",
-  fallback: "일부 연결 없이 답변을 준비했습니다.",
+  fallback: "일부 선택적 조회 단계를 건너뛰고 답변을 준비했습니다.",
   failed: "처리 중 일부 기능에서 문제가 발생했습니다.",
   cancelled: "응답 생성을 중단했습니다.",
   research_intent_analysis: "연구 질문의 목적을 파악하고 있습니다.",

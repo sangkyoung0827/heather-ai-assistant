@@ -185,12 +185,14 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
     }
   }
 
-  if (intent.personal || intent.document) {
+  if (intent.personal || intent.document || shouldSearchPersonalDocuments(payload.message)) {
     report?.("personal_memory_search", "active", 30, { type: "personal_memory", name: "documents" });
     try {
       const documentMemories = await retrieveDocumentMemoryContext(await requireContextUser(request), "personal", payload.message);
       if (documentMemories.length) {
-        payload = { ...payload, memories: [...payload.memories, ...documentMemories] };
+        // Document excerpts must be first so the bounded provider context always
+        // receives the source material that was found for this request.
+        payload = { ...payload, memories: [...documentMemories, ...payload.memories].slice(0, 12) };
         usedTools.push("document_context");
         report?.("personal_memory_search", "completed", 38, { type: "personal_memory", name: `${documentMemories.length} document chunks` });
       } else report?.("personal_memory_search", "skipped", 38, { type: "personal_memory" });
@@ -273,6 +275,10 @@ function classifyIntent(message: string) {
     project: /\b(project|status|progress|current state|xudy)\b|프로젝트|진행|현황|상태|현재|자이디|주디|xudy/i.test(normalized),
     currentInfo: /\b(search|find|latest|news|current|today|202[0-9])\b|검색|찾아|최신|최근|뉴스|공고|오늘|현재|[0-9]{4}년/.test(normalized)
   };
+}
+
+function shouldSearchPersonalDocuments(message: string) {
+  return /\b(my (?:document|file|journal|diary)|uploaded (?:document|file))\b|개인\s*메모리|내\s*(?:파일|문서|일기)|업로드(?:한|한\s*파일|한\s*문서)|일기(?:를|의|파일)?/.test(message.toLocaleLowerCase());
 }
 
 function selectRelevantMemories(message: string, memories: MemoryRecord[]) {

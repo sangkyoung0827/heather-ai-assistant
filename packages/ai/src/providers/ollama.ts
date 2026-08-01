@@ -39,7 +39,11 @@ function compactContext(payload: ChatRequestPayload): string {
   const memories = payload.memories
     .filter((memory) => !memory.archived)
     .slice(0, 6)
-    .map((memory) => `- ${memory.type}: ${memory.content.slice(0, 240)}`)
+    .map((memory) => {
+      const isDocumentExcerpt = memory.tags.includes("document");
+      const excerpt = memory.content.slice(0, isDocumentExcerpt ? 1_500 : 240);
+      return `- ${memory.type}${isDocumentExcerpt ? " (uploaded document excerpt)" : ""} [${memory.source}]: ${excerpt}`;
+    })
     .join("\n");
 
   const projects = payload.projects
@@ -56,6 +60,7 @@ function compactContext(payload: ChatRequestPayload): string {
   return [
     "로컬 장기 기억:",
     memories || "- 없음",
+    "업로드 문서 발췌가 제공된 경우에만 그 원문을 근거로 답한다. 발췌에 없는 내용은 파일에서 읽었다고 추측하지 않는다.",
     "",
     "프로젝트:",
     projects || "- 없음",
