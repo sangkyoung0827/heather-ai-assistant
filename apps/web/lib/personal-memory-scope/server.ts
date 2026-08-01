@@ -6,12 +6,14 @@ export type PersonalMemoryScope = "all" | "journal" | "direct" | "project";
 export type PersonalMemoryScopeCounts = Record<PersonalMemoryScope, number>;
 
 export async function getPersonalMemoryScopeData(context: ContextClient, scope: PersonalMemoryScope, query: string) {
-  const [personal, documents, projects, projectMemories, operationalRecords] = await Promise.all([
+  const [personal, documents, projects, projectMemories, operationalRecords, persistentMemos, persistentEntries] = await Promise.all([
     context.client.from("personal_memories").select("id,content,memory_type,tags,metadata,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).eq("archived", false).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("documents").select("id,title,source_date,document_type,uploaded_at,original_filename,mime_type,extension,storage_path,parsing_status", { count: "exact" }).eq("user_id", context.user.id).eq("memory_scope", "personal").is("deleted_at", null).order("uploaded_at", { ascending: false }).limit(1000),
     context.client.from("context_projects").select("id,name,status,created_at,updated_at", { count: "exact" }).eq("owner_user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
     context.client.from("project_context_memories").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
-    context.client.from("operational_contexts").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000)
+    context.client.from("operational_contexts").select("id,project_id,title,content,source,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).order("updated_at", { ascending: false }).limit(1000),
+    context.client.from("personal_memos").select("id,title,current_summary,version,status,created_at,updated_at", { count: "exact" }).eq("user_id", context.user.id).in("status", ["active", "archived"]).order("updated_at", { ascending: false }).limit(1000),
+    context.client.from("personal_memo_entries").select("memo_id,status").eq("user_id", context.user.id).eq("status", "active").limit(5000)
   ]);
   if (personal.error) throw new ContextControlError("Personal memory search is temporarily unavailable.", 503);
   const storedDocuments = documents.error ? [] : documents.data || [];
@@ -27,8 +29,11 @@ export async function getPersonalMemoryScopeData(context: ContextClient, scope: 
     const extraction = extractionByDocument.get(String(document.id));
     return { ...document, document_extractions: extraction ? [extraction] : [] };
   });
+  const entryCountByMemo = new Map<string, number>();
+  if (!persistentEntries.error) for (const entry of persistentEntries.data || []) entryCountByMemo.set(String(entry.memo_id), (entryCountByMemo.get(String(entry.memo_id)) || 0) + 1);
   const direct = [
     ...(personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).map((row) => toDirectMemory(row)),
+    ...(persistentMemos.error ? [] : persistentMemos.data || []).map((row) => toPersistentMemoMemory(row, entryCountByMemo.get(String(row.id)) || 0)),
     ...uploadedDocuments.filter((row) => row.document_type !== "journal").map((row) => toUploadedDocumentMemory(row))
   ];
   const journal = uploadedDocuments.filter((row) => row.document_type === "journal").map((row) => toJournalMemory(row));
@@ -37,7 +42,7 @@ export async function getPersonalMemoryScopeData(context: ContextClient, scope: 
     ...(projectMemories.error ? [] : projectMemories.data || []).map((row) => toProjectRecordMemory(row, "project_context")),
     ...(operationalRecords.error ? [] : operationalRecords.data || []).map((row) => toProjectRecordMemory(row, "operational_record"))
   ];
-  const directCount = (personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).length + uploadedDocuments.filter((row) => row.document_type !== "journal").length;
+  const directCount = (personal.data || []).filter((row) => !isDocumentBacked(row.metadata)).length + (persistentMemos.error ? 0 : persistentMemos.count || 0) + uploadedDocuments.filter((row) => row.document_type !== "journal").length;
   const journalCount = journal.length;
   const projectCount = (projects.error ? 0 : projects.count || 0) + (projectMemories.error ? 0 : projectMemories.count || 0) + (operationalRecords.error ? 0 : operationalRecords.count || 0);
   const counts: PersonalMemoryScopeCounts = { all: directCount + journalCount + projectCount, journal: journalCount, direct: directCount, project: projectCount };
@@ -55,6 +60,21 @@ function isDocumentBacked(metadata: unknown) {
 
 function toDirectMemory(row: { id: string; content: string; memory_type: string; tags: string[] | null; created_at: string; updated_at: string }): MemoryRecord {
   return { id: String(row.id), type: String(row.memory_type || "important_fact") as MemoryRecord["type"], content: String(row.content), source: "personal", confidence: .72, tags: Array.isArray(row.tags) ? row.tags.map(String) : [], created_at: String(row.created_at), updated_at: String(row.updated_at), archived: false };
+}
+
+function toPersistentMemoMemory(row: { id: string; title: string; current_summary: string; version: number; created_at: string; updated_at: string }, activeEntryCount: number): MemoryRecord {
+  const summary = String(row.current_summary || "아직 정리된 내용이 없습니다.");
+  return {
+    id: `persistent-memo-${row.id}`,
+    type: "important_fact",
+    content: `${row.title}\n${summary}`.slice(0, 8_000),
+    source: `personal memo · ${row.title} · ${activeEntryCount} items · v${row.version}`,
+    confidence: .9,
+    tags: ["direct_record", "personal_memo"],
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    archived: false
+  };
 }
 
 function toJournalMemory(row: { id: string; title: string; source_date: string | null; uploaded_at: string; parsing_status: string; document_extractions: Array<{ extracted_text: string | null; status: string }> | null }): MemoryRecord {

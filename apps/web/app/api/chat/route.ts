@@ -9,6 +9,7 @@ import { ContextControlError, enrichChatPayloadFromContext, requireContextUser }
 import { retrieveDocumentMemoryContext } from "../../../lib/documents/server";
 import { executeQuickLinkIntent, parseQuickLinkIntent } from "../../../lib/quick-links/server";
 import { DirectCommandRepository } from "../../../lib/intent/direct-command-repository";
+import { parsePersonalMemoIntent, runPersonalMemoSkill, type PersonalMemoSkillResult } from "../../../lib/personal-memos/server";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 
 export const runtime = "nodejs";
@@ -19,6 +20,7 @@ interface CachedChatResponse extends ChatResponsePayload {
   cached?: boolean;
   search?: { used: boolean; skillId: string; provider: string; cached: boolean; sources: SearchSource[] };
   quickLinksChanged?: boolean;
+  personalMemo?: { id: string; title: string; action: string };
 }
 
 type ResolvedChat = { response: CachedChatResponse; usedTools: string[] };
@@ -84,7 +86,7 @@ function createProgressStream(request: Request, receivedPayload: ChatRequestPayl
         }
         emit({ type: "content_delta", data: { text: resolved.response.message } });
         report("completed", "completed", 100);
-        emit({ type: "done", data: { used_tools: resolved.usedTools, duration_ms: Date.now() - startedAt, provider: resolved.response.provider, model: resolved.response.model, cached: resolved.response.cached } });
+        emit({ type: "done", data: { used_tools: resolved.usedTools, duration_ms: Date.now() - startedAt, provider: resolved.response.provider, model: resolved.response.model, cached: resolved.response.cached, personal_memo: resolved.response.personalMemo } });
       } catch (error) {
         report("failed", "failed", 100);
         emit({ type: "error", data: { user_message: safeError(error), recoverable: true } });
@@ -105,6 +107,7 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   report?.("intent_analysis", "active", 12);
   const intent = classifyIntent(receivedPayload.message);
   const personalDocumentRequest = shouldSearchPersonalDocuments(receivedPayload.message);
+  const personalMemoIntent = parsePersonalMemoIntent(receivedPayload.message);
   report?.("intent_analysis", "completed", 16);
 
   report?.("direct_command_check", "active", 20, { type: "direct_command" });
@@ -115,7 +118,7 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   } catch {
     report?.("direct_command_check", "warning", 24, { type: "direct_command" });
   }
-  if (directMatch && !personalDocumentRequest) {
+  if (directMatch && !personalDocumentRequest && !personalMemoIntent) {
     report?.("direct_command_check", "completed", 24, { type: "direct_command", name: directMatch.command.canonicalTrigger });
     usedTools.push("direct_command");
     await directCommands.incrementUsage(directMatch.command.id).catch(() => undefined);
@@ -128,6 +131,44 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   report?.("direct_command_check", directMatch ? "skipped" : "completed", 24, directMatch
     ? { type: "direct_command", detail: "개인 메모리 요청이므로 저장된 고정 응답 대신 원문을 조회합니다." }
     : { type: "direct_command" });
+
+  if (personalMemoIntent) {
+    let memoResult: PersonalMemoSkillResult;
+    try {
+      const result = await runPersonalMemoSkill(await requireContextUser(request), {
+        message: receivedPayload.message,
+        conversationId: receivedPayload.conversationId || receivedPayload.conversation?.id,
+        activeMemoId: receivedPayload.activePersonalMemoId,
+        sourceMessageId: receivedPayload.messageId || receivedPayload.clientMessageId,
+        onProgress: (stage, status, detail) => report?.(stage, status, stage === "personal_memo_verify" ? 94 : stage === "personal_memo_summary" ? 86 : stage === "personal_memo_write" ? 74 : 48, { type: "personal_memo", detail })
+      });
+      if (!result) throw new ContextControlError("Personal memo command could not be resolved.", 400);
+      memoResult = result;
+    } catch (error) {
+      if (error instanceof ContextControlError) {
+        const korean = containsHangul(receivedPayload.message);
+        const message = error.status === 401
+          ? korean ? "개인 메모리를 사용하려면 먼저 로그인해주세요." : "Please sign in to use personal memos."
+          : error.message.includes("migration")
+            ? korean ? "누적형 개인 메모리를 사용하려면 최신 Heather 데이터베이스 migration을 먼저 실행해야 합니다." : "The latest Heather database migration is required for persistent personal memos."
+            : korean ? "개인 메모리를 처리하지 못했습니다. 저장 결과를 확인한 뒤 다시 시도해주세요." : "I could not complete that personal memo action. Please try again.";
+        return { response: { message, title: generateConversationTitle(receivedPayload.message), risk: { level: "low", requiresConfirmation: false, reason: "Personal memo action could not be completed." }, provider: "personal-memo", model: "server" }, usedTools: ["personal_memo"] };
+      }
+      throw error;
+    }
+    usedTools.push("personal_memo");
+    return {
+      response: {
+        message: memoResult.message,
+        title: generateConversationTitle(receivedPayload.message),
+        risk: { level: memoResult.requiresConfirmation ? "medium" : "low", requiresConfirmation: Boolean(memoResult.requiresConfirmation), reason: "Persistent personal memo action." },
+        provider: "personal-memo",
+        model: "server",
+        personalMemo: memoResult.memo ? { id: memoResult.memo.id, title: memoResult.memo.title, action: memoResult.action } : undefined
+      },
+      usedTools
+    };
+  }
 
   const quickLinkIntent = parseQuickLinkIntent(receivedPayload.message);
   if (quickLinkIntent) {

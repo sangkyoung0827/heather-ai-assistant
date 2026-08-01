@@ -43,7 +43,7 @@ function activityIcon(event: ChatProgressEvent) {
   if (event.stage === "intent_analysis" || event.stage === "research_intent_analysis" || event.stage === "scope_definition") return BrainCircuit;
   if (event.stage === "direct_command_check") return Command;
   if (["quick_link_parse", "quick_link_url_validation", "quick_link_duplicate_check", "quick_link_write", "quick_link_verify"].includes(event.stage)) return FilePenLine;
-  if (["personal_memory_search", "personal_document_search", "research_memory_search", "research_material_search", "experiment_context_load"].includes(event.stage)) return Database;
+  if (["personal_memory_search", "personal_document_search", "personal_memo_request", "personal_memo_target", "personal_memo_read", "personal_memo_write", "personal_memo_summary", "personal_memo_verify", "research_memory_search", "research_material_search", "experiment_context_load"].includes(event.stage)) return Database;
   if (event.stage === "project_context_resolve") return FolderKanban;
   if (["web_search_decision", "web_search", "source_validation", "query_generation", "provider_routing", "cache_check", "openalex_search", "crossref_search", "pubmed_search", "europe_pmc_search", "semantic_scholar_search", "unpaywall_check", "research_web_search", "production_literature_search"].includes(event.stage)) return Search;
   if (["response_review", "metadata_normalization", "doi_validation", "deduplication", "abstract_verification", "full_text_availability_check", "source_relevance_scoring", "evidence_assessment", "contradiction_check", "limitation_analysis", "citation_assembly"].includes(event.stage)) return ShieldCheck;

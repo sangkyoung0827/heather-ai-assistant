@@ -159,7 +159,7 @@ export function MemoryPanel({ variant = "personal", memories, locale, onSaveMemo
       <form className="simple-memory-search" onSubmit={(event) => { event.preventDefault(); applySearch(); }}><Search /><input value={draftQuery} onChange={(event) => setDraftQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /><button type="submit" className="sr-only">{copy.search}</button></form>
       {!isResearch ? <><PersonalMemoryScopeBar scope={scope} counts={scopeData?.counts || null} locale={resolvedLocale} onChange={changeScope} />{appliedQuery && scopeData ? <p className="personal-memory-search-result-count">{searchResultLabel(scopeData.searchCount, resolvedLocale)}</p> : null}{scopeError ? <p className="personal-memory-scope-error" role="status">{scopeError}</p> : null}</> : null}
       <div className="memory-list heather-scrollbar simple-memory-items">
-        {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}>{isDocumentMemory(memory) ? <DocumentMemoryRow memory={memory} locale={resolvedLocale} /> : <span className="simple-memory-content">{memory.content}</span>}<time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
+        {renderedMemories.length ? renderedMemories.map((memory) => <button key={memory.id} type="button" onClick={() => selectMemory(memory)} className={`memory-row simple-memory-row ${selectedId === memory.id ? "is-selected" : ""}`}>{isDocumentMemory(memory) ? <DocumentMemoryRow memory={memory} locale={resolvedLocale} /> : isPersistentMemo(memory) ? <PersistentMemoRow memory={memory} locale={resolvedLocale} /> : <span className="simple-memory-content">{memory.content}</span>}<time>{formatDate(memory.updated_at, resolvedLocale)}</time></button>) : <MemoryEmpty query={Boolean(appliedQuery)} copy={copy} />}
         {renderedMemories.length < filteredMemories.length ? <button type="button" className="simple-memory-more" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)}>{copy.loadMore}</button> : null}
       </div>
     </aside>
@@ -180,12 +180,18 @@ function DocumentMemoryRow({ memory, locale }: { memory: MemoryRecord; locale: H
   const status = locale === "en" ? "Original file · ready for chat reading" : "원본 파일 · 개인 채팅에서 읽기 가능";
   return <span className="simple-memory-document"><FileText aria-hidden="true" /><span><strong>{title}</strong><small>{status}</small></span></span>;
 }
+function PersistentMemoRow({ memory, locale }: { memory: MemoryRecord; locale: HeatherLanguage }) {
+  const [title, ...summary] = memory.content.split("\n");
+  const entryCount = memory.source.match(/·\s*(\d+)\s+items/)?.[1] || "0";
+  return <span className="simple-memory-document"><FileText aria-hidden="true" /><span><strong>{title}</strong><small>{summary.join(" ").slice(0, 160)}</small><small>{locale === "en" ? `${entryCount} entries` : `항목 ${entryCount}개`}</small></span></span>;
+}
 function MemoryAuthGate({ copy, auth }: { copy: Copy; auth: NonNullable<MemoryPanelProps["auth"]> }) { return <section className="memory-auth-gate"><div><h2>{copy.signInTitle}</h2><p>{auth.configured ? copy.signInDescription : copy.notConfigured}</p>{auth.configured ? <button type="button" onClick={() => void auth.signInWithGoogle()}>{copy.continueGoogle}</button> : null}</div></section>; }
 
 function DeleteDialog({ copy, onCancel, onDelete, loading }: { copy: Copy; onCancel: () => void; onDelete: () => void; loading: boolean }) { return <div className="simple-memory-modal-backdrop" role="presentation"><section className="simple-memory-modal" role="dialog" aria-modal="true" aria-labelledby="memory-delete-title"><button type="button" className="simple-memory-modal-close" onClick={onCancel} aria-label={copy.cancel}><X /></button><h2 id="memory-delete-title">{copy.deleteTitle}</h2><p>{copy.deleteDescription}</p><footer><button type="button" className="simple-memory-delete" onClick={onCancel}>{copy.cancel}</button><button type="button" className="simple-memory-save is-danger" onClick={onDelete} disabled={loading}>{loading ? <Loader2 className="animate-spin" /> : null}{copy.delete}</button></footer></section></div>; }
 
 function inScope(memory: MemoryRecord, variant: "personal" | "research") { return variant === "research" ? memory.type === "project_context" || memory.source.startsWith("research") : memory.type !== "project_context" && !memory.source.startsWith("research"); }
 function isDocumentMemory(memory: MemoryRecord) { return /^(journal|direct)-document-/.test(memory.id); }
+function isPersistentMemo(memory: MemoryRecord) { return memory.id.startsWith("persistent-memo-"); }
 function searchableMemory(memory: MemoryRecord) { return `${memory.content} ${memory.source} ${memory.tags.join(" ")} ${memory.type}`.toLocaleLowerCase(); }
 function formatDate(value: string, locale: HeatherLanguage) { return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "ko-KR", { year: "numeric", month: "numeric", day: "numeric" }).format(new Date(value)); }
 function countLabel(count: number, locale: HeatherLanguage) { return locale === "en" ? `${count} ${count === 1 ? "memory" : "memories"}` : `${count}개`; }

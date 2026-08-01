@@ -352,6 +352,8 @@ export interface ChatRequestPayload {
   message: string;
   messageId?: string;
   conversationId?: string;
+  /** Active persistent memo for same-memo follow-up commands. */
+  activePersonalMemoId?: string;
   clientMessageId?: string;
   conversation?: Conversation;
   settings: HeatherSettings;

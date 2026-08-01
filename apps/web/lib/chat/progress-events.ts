@@ -9,6 +9,12 @@ export type ChatProgressStage =
   | "quick_link_verify"
   | "personal_memory_search"
   | "personal_document_search"
+  | "personal_memo_request"
+  | "personal_memo_target"
+  | "personal_memo_read"
+  | "personal_memo_write"
+  | "personal_memo_summary"
+  | "personal_memo_verify"
   | "project_context_resolve"
   | "web_search_decision"
   | "web_search"
@@ -71,7 +77,7 @@ export type ChatProgressEvent = {
   stage: HeatherProgressStage;
   status: ChatProgressStatus;
   progress: number;
-  source_type?: "direct_command" | "personal_memory" | "project_context" | "web_search" | "llm" | "cache" | "research_memory" | "research_material" | "research_project" | "academic_search" | "research_analysis" | "process_simulation";
+  source_type?: "direct_command" | "personal_memory" | "personal_memo" | "project_context" | "web_search" | "llm" | "cache" | "research_memory" | "research_material" | "research_project" | "academic_search" | "research_analysis" | "process_simulation";
   source_name?: string;
   provider?: string;
   provider_status?: "pending" | "active" | "completed" | "partial" | "limited" | "warning" | "failed" | "skipped";
@@ -94,7 +100,7 @@ export type ChatProgressEvent = {
 export type ChatStreamEvent =
   | { type: "progress"; data: ChatProgressEvent }
   | { type: "content_delta"; data: { text: string } }
-  | { type: "done"; data: { used_tools: string[]; duration_ms: number; provider?: string; model?: string; cached?: boolean; conversation_id?: string; title?: string } }
+  | { type: "done"; data: { used_tools: string[]; duration_ms: number; provider?: string; model?: string; cached?: boolean; conversation_id?: string; title?: string; personal_memo?: { id: string; title: string; action: string } } }
   | { type: "error"; data: { user_message: string; recoverable: boolean } };
 
 type ProgressCopy = Record<HeatherProgressStage, string>;
@@ -110,6 +116,12 @@ const KO: ProgressCopy = {
   quick_link_verify: "등록 결과를 확인하고 있습니다.",
   personal_memory_search: "관련 개인 메모리를 찾고 있습니다.",
   personal_document_search: "업로드한 개인 문서 원문을 찾고 있습니다.",
+  personal_memo_request: "메모 요청을 확인하고 있습니다.",
+  personal_memo_target: "대상 메모를 찾고 있습니다.",
+  personal_memo_read: "기존 내용을 확인하고 있습니다.",
+  personal_memo_write: "새 정보를 저장하고 있습니다.",
+  personal_memo_summary: "메모 정리본을 갱신하고 있습니다.",
+  personal_memo_verify: "저장 결과를 확인하고 있습니다.",
   project_context_resolve: "관련 프로젝트 정보를 연결하고 있습니다.",
   web_search_decision: "최신 정보가 필요한지 판단하고 있습니다.",
   web_search: "신뢰할 수 있는 자료를 검색하고 있습니다.",
@@ -172,6 +184,12 @@ const EN: ProgressCopy = {
   quick_link_verify: "Checking the saved link.",
   personal_memory_search: "Finding relevant personal memory.",
   personal_document_search: "Finding uploaded personal-document excerpts.",
+  personal_memo_request: "Checking the memo request.",
+  personal_memo_target: "Finding the target memo.",
+  personal_memo_read: "Checking existing memo content.",
+  personal_memo_write: "Saving the new information.",
+  personal_memo_summary: "Refreshing the memo summary.",
+  personal_memo_verify: "Verifying the saved memo.",
   project_context_resolve: "Connecting related project context.",
   web_search_decision: "Checking whether current information is needed.",
   web_search: "Searching trusted sources.",

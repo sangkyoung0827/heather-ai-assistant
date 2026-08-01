@@ -56,6 +56,7 @@ interface ApiChatResponse extends ChatResponsePayload {
   meteredApiCall?: boolean;
   error?: string;
   model?: string;
+  personalMemo?: { id: string; title: string; action: string };
 }
 
 interface SpeechRecognitionResultLike {
@@ -115,6 +116,7 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposingRef = useRef(false);
   const conversationRepositoryRef = useRef(new PersonalConversationRepository());
+  const activeMemoByConversationRef = useRef(new Map<string, string>());
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) || null,
@@ -217,6 +219,10 @@ export function ChatPanel({
     try {
       const payload: ChatRequestPayload = {
         message,
+        messageId: userMessage.id,
+        clientMessageId: userMessage.id,
+        conversationId: optimisticConversation.id,
+        activePersonalMemoId: activeMemoByConversationRef.current.get(optimisticConversation.id),
         conversation: optimisticConversation,
         settings,
         memories,
@@ -242,6 +248,7 @@ export function ChatPanel({
 
       await onSaveConversation(finalConversation);
       let persistenceFailed = false;
+      let persistedConversationId = finalConversation.id;
       try {
         const persistedConversation = await conversationRepositoryRef.current.save(finalConversation);
         if (persistedConversation.id !== finalConversation.id) {
@@ -249,9 +256,15 @@ export function ChatPanel({
           await onSaveConversation(persistedConversation);
           setActiveConversationId(persistedConversation.id);
         }
+        persistedConversationId = persistedConversation.id;
       } catch {
         // Do not lose a completed answer if account persistence is temporarily unavailable.
         persistenceFailed = true;
+      }
+      if (data.personalMemo) {
+        activeMemoByConversationRef.current.set(optimisticConversation.id, data.personalMemo.id);
+        activeMemoByConversationRef.current.set(persistedConversationId, data.personalMemo.id);
+        void persistActiveMemoContext(persistedConversationId, data.personalMemo);
       }
       setProviderStatus(persistenceFailed ? "답변은 완료됐지만 개인 채팅 기록을 계정에 저장하지 못했습니다." : formatProviderStatus(data));
 
@@ -309,7 +322,7 @@ export function ChatPanel({
   }
 
   async function resolveHeatherResponse(payload: ChatRequestPayload, onEvent: (event: ChatStreamEvent) => void, signal: AbortSignal): Promise<ApiChatResponse> {
-    const cachedResponse = payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) ? readCachedResponse(payload) : null;
+    const cachedResponse = payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) && !isPersonalMemoCommand(payload.message) ? readCachedResponse(payload) : null;
     if (cachedResponse) {
       onEvent({ type: "progress", data: createClientProgressEvent("request_received", "completed", 10) });
       onEvent({ type: "progress", data: createClientProgressEvent("response_composition", "completed", 92, "cache") });
@@ -339,17 +352,18 @@ export function ChatPanel({
     let provider: string | undefined;
     let model: string | undefined;
     let wasCached = false;
+    let personalMemo: ApiChatResponse["personalMemo"];
     let streamError: string | undefined;
     await readChatProgressStream(response, (event) => {
       onEvent(event);
       if (event.type === "content_delta") message += event.data.text;
-      if (event.type === "done") { provider = event.data.provider; model = event.data.model; wasCached = Boolean(event.data.cached); }
+      if (event.type === "done") { provider = event.data.provider; model = event.data.model; wasCached = Boolean(event.data.cached); personalMemo = event.data.personal_memo; }
       if (event.type === "error") streamError = event.data.user_message;
     });
     if (streamError || !message) throw new Error(streamError || "Heather chat request failed.");
-    const data: ApiChatResponse = { message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Text response." }, provider, model, cached: wasCached };
+    const data: ApiChatResponse = { message, title: generateConversationTitle(payload.message), risk: { level: "low", requiresConfirmation: false, reason: "Text response." }, provider, model, cached: wasCached, personalMemo };
 
-    if (payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message)) {
+    if (payload.settings.cacheResponses && !isQuickLinkCommand(payload.message) && !isPersonalMemoryRequest(payload.message) && !isPersonalMemoCommand(payload.message)) {
       writeCachedResponse(payload, data);
     }
 
@@ -594,6 +608,18 @@ export function ChatPanel({
   );
 }
 
+async function persistActiveMemoContext(conversationId: string, memo: NonNullable<ApiChatResponse["personalMemo"]>) {
+  if (!conversationId || conversationId.startsWith("conversation-")) return;
+  const session = await getSupabaseBrowserClient()?.auth.getSession();
+  const token = session?.data.session?.access_token;
+  if (!token) return;
+  await fetch("/api/personal-memos/context", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ conversationId, memoId: memo.id, action: memo.action })
+  }).catch(() => undefined);
+}
+
 function formatProviderStatus(data: ApiChatResponse): string {
   if (data.provider === "agent-runtime") {
     return "웹 검색 결과를 반영한 응답";
@@ -720,6 +746,10 @@ function isQuickLinkCommand(message: string) {
 
 function isPersonalMemoryRequest(message: string) {
   return /\b(my (?:document|file|journal|diary)|uploaded (?:document|file))\b|개인\s*메모리|내\s*(?:파일|문서|일기)|업로드(?:한|한\s*파일|한\s*문서)|일기(?:를|의|파일)?/.test(message.toLocaleLowerCase());
+}
+
+function isPersonalMemoCommand(message: string) {
+  return /(?:메모|memo).*(?:만들|생성|작성|등록|추가|덧붙|보태|기록|수정|정정|고쳐|바꿔|변경|대체|삭제|지워|제거|복원|보여|조회|찾아|검색|이력)|(?:같은|그|방금|앞의)\s*메모/i.test(message);
 }
 
 function hashString(value: string): string {
