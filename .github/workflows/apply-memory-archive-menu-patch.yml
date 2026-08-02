@@ -1,0 +1,35 @@
+name: Apply memory archive menu patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/patches/memory-archive-menu.patch
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply verified patch and clean up
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check .github/patches/memory-archive-menu.patch
+          git apply .github/patches/memory-archive-menu.patch
+          rm .github/patches/memory-archive-menu.patch
+          rm .github/workflows/apply-memory-archive-menu-patch.yml
+          rmdir .github/patches 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add standalone memory archive menu"
+          git push origin HEAD:main
