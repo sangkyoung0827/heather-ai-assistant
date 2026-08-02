@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "../../../lib/supabase-client";
 import { syncHeatherSession } from "../../../lib/auth-session";
+import { HEATHER_AUTH_RETURN_KEY } from "../../../components/auth/AuthReturnTracker";
+
+function safeReturnPath(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/auth/")) return "/dashboard";
+  return value;
+}
 
 export default function AuthCallbackPage() {
   const [message, setMessage] = useState("Signing you in...");
@@ -37,9 +43,11 @@ export default function AuthCallbackPage() {
         const { data: persisted, error: persistedError } = await client.auth.getSession();
         if (persistedError || !persisted.session) throw persistedError || new Error("No saved session was available after OAuth.");
         syncHeatherSession(persisted.session);
+        const returnTo = safeReturnPath(window.sessionStorage.getItem(HEATHER_AUTH_RETURN_KEY));
+        window.sessionStorage.removeItem(HEATHER_AUTH_RETURN_KEY);
         window.history.replaceState({}, document.title, window.location.pathname);
-        // A full navigation makes every workspace initialize from the same persisted session.
-        if (active) window.location.replace("/dashboard");
+        // A full navigation makes the destination workspace initialize from the persisted session.
+        if (active) window.location.replace(returnTo);
       } catch (error) {
         if (active) setMessage(error instanceof Error ? `Sign-in could not be completed: ${error.message}` : "Sign-in could not be completed. Please try again.");
       }
