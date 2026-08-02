@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>추억 저장소</title>
+  <style>html,body{height:100%;margin:0;background:#03070c;color:#dce7f4;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans KR",sans-serif}body{display:grid;place-items:center}.status{padding:24px;text-align:center}.status strong{display:block;margin-bottom:8px;font-size:16px}.status span{color:#8291a7;font-size:13px}</style>
+</head>
+<body>
+  <div class="status"><strong>추억 저장소를 여는 중입니다.</strong><span>독립 보관 페이지를 불러오고 있습니다.</span></div>
+  <script>
+  (async()=>{
+    try{
+      if(typeof DecompressionStream!=="function")throw new Error("This browser does not support DecompressionStream.");
+      const names=["archive.part1.txt", "archive.part2.txt", "archive.part3.txt", "archive.part4.txt", "archive.part5.txt", "archive.part6.txt"];
+      const responses=await Promise.all(names.map(name=>fetch(`./${name}`,{cache:"no-store"})));
+      if(responses.some(response=>!response.ok))throw new Error("Archive bundle request failed.");
+      const encoded=(await Promise.all(responses.map(response=>response.text()))).join("");
+      const binary=atob(encoded);
+      const bytes=Uint8Array.from(binary,character=>character.charCodeAt(0));
+      const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+      const html=await new Response(stream).text();
+      document.open();document.write(html);document.close();
+    }catch(error){
+      document.body.innerHTML=`<div class="status"><strong>추억 저장소를 열지 못했습니다.</strong><span>${String(error&&error.message||error)}</span></div>`;
+    }
+  })();
+  </script>
+</body>
+</html>
