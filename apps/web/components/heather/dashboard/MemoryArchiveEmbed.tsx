@@ -12,13 +12,13 @@ export function MemoryArchiveEmbed({ locale }: { locale: HeatherLanguage }) {
           <h3>{korean ? "추억 저장소" : "Memory archive"}</h3>
           <p>{korean ? "사진과 일기로 나의 역사를 기록하는 공간" : "A personal history built from photos and journals"}</p>
         </div>
-        <a href="/memory-archive/index.html" target="_blank" rel="noreferrer">
+        <a href="/memory-archive">
           {korean ? "전체 화면" : "Open full screen"}
         </a>
       </header>
       <div className="memory-archive-frame-shell">
         <iframe
-          src="/memory-archive/index.html"
+          src="/api/memory-archive"
           title={korean ? "추억 저장소" : "Memory archive"}
           loading="eager"
           sandbox="allow-scripts allow-forms allow-modals allow-downloads allow-same-origin"
