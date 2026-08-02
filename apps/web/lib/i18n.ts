@@ -11,6 +11,7 @@ const messages = {
       personal: "개인 메모리",
       research: "연구 메모리",
       researcher: "Researcher",
+      memoryArchive: "추억 저장소",
       local: "로컬 제어",
       settings: "설정",
       home: "Heather 홈"
@@ -59,6 +60,7 @@ const messages = {
       personal: "Personal Memory",
       research: "Research Memory",
       researcher: "Researcher",
+      memoryArchive: "Memory Archive",
       local: "Local Control",
       settings: "Settings",
       home: "Heather home"
