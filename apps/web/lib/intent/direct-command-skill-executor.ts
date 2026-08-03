@@ -1,10 +1,12 @@
 import type { IntentCommand } from "./direct-command-engine";
+import { executePersonMemorySkill, type PersonMemorySkillId } from "../person-memory/skills";
 
 export type DirectCommandSkillId =
   | "general_web_search"
   | "personal_memory_summary"
   | "research_web_discovery"
-  | "research_academic_discovery";
+  | "research_academic_discovery"
+  | PersonMemorySkillId;
 
 export type DirectCommandChatType = "personal" | "research";
 export type DirectCommandSkillDirective = {
@@ -23,7 +25,7 @@ export type DirectCommandSkillSource = {
 
 export type DirectCommandActionResult = {
   message: string;
-  provider: "direct-command" | "agent-runtime";
+  provider: "direct-command" | "agent-runtime" | "person-memory";
   model: string;
   usedTools: string[];
   skillId?: DirectCommandSkillId;
@@ -63,6 +65,7 @@ type ExecuteOptions = {
   chatType: DirectCommandChatType;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  personSkillExecutor?: typeof executePersonMemorySkill;
 };
 
 const DIRECTIVE_PATTERN = /^@skill\s+([a-z0-9_.-]+)(?:\s+([\s\S]+))?$/i;
@@ -71,7 +74,9 @@ const ALLOWED_SKILLS: Record<DirectCommandSkillId, readonly DirectCommandChatTyp
   general_web_search: ["personal"],
   personal_memory_summary: ["personal"],
   research_web_discovery: ["research"],
-  research_academic_discovery: ["research"]
+  research_academic_discovery: ["research"],
+  "person_memory.get_full_profile": ["personal"],
+  "person_memory.timeline_search": ["personal"]
 };
 
 export class DirectCommandSkillError extends Error {
@@ -120,6 +125,23 @@ export async function executeDirectCommandAction(options: ExecuteOptions): Promi
 
   if (!ALLOWED_SKILLS[directive.skillId].includes(options.chatType)) {
     throw new DirectCommandSkillError("이 Skill은 현재 채팅 유형에서 실행할 수 없습니다.", "SKILL_SCOPE_MISMATCH");
+  }
+
+  if (isPersonMemorySkill(directive.skillId)) {
+    const execute = options.personSkillExecutor || executePersonMemorySkill;
+    const result = await execute({
+      request: options.request,
+      skillId: directive.skillId,
+      parameters: directive.parameters,
+      message: options.message
+    });
+    return {
+      message: result.message,
+      provider: "person-memory",
+      model: result.model,
+      usedTools: result.usedTools,
+      skillId: directive.skillId
+    };
   }
 
   const baseUrl = process.env.AGENT_RUNTIME_URL?.replace(/\/$/, "");
@@ -171,6 +193,10 @@ export async function executeDirectCommandAction(options: ExecuteOptions): Promi
     cached: Boolean(payload.result.cached),
     sources
   };
+}
+
+function isPersonMemorySkill(skillId: DirectCommandSkillId): skillId is PersonMemorySkillId {
+  return skillId === "person_memory.get_full_profile" || skillId === "person_memory.timeline_search";
 }
 
 function resolveLocale(value: unknown, message: string): "ko" | "en" {
