@@ -110,9 +110,12 @@ export const MEMORY_ARCHIVE_MENU_SCRIPT = String.raw`<script id="heather-memory-
 (function () {
   var START_YEAR = 2018;
   var END_YEAR = 2040;
+  var DEMO_ID_PREFIX = "demo-";
+  var KNOWN_DEMO_IDS = ["demo-campus", "demo-cherry", "demo-jeju", "demo-coffee", "demo-friends", "demo-night"];
   var mounted = false;
   var scheduled = false;
   var lastSignature = "";
+  var cleanupRunning = false;
 
   function archiveEntries() {
     try { return Array.isArray(entries) ? entries : []; }
@@ -138,12 +141,76 @@ export const MEMORY_ARCHIVE_MENU_SCRIPT = String.raw`<script id="heather-memory-
     try {
       selectedYear = String(year);
       selectedMonth = "all";
-      if (typeof renderYearList === "function") renderYearList();
+      selectedEntryId = null;
       if (typeof renderContent === "function") renderContent();
     } catch (error) {
       return;
     }
+    lastSignature = "";
     schedule();
+  }
+
+  async function deleteStoredValue(key) {
+    try {
+      if (window.storage && typeof window.storage.delete === "function") {
+        await window.storage.delete(key, false);
+        return;
+      }
+    } catch (error) {}
+    try { window.localStorage.removeItem(key); } catch (error) {}
+  }
+
+  async function saveCleanEntries(list) {
+    try {
+      entries = list;
+      if (typeof saveEntries === "function") {
+        await saveEntries();
+        return;
+      }
+    } catch (error) {}
+    try {
+      var serialized = JSON.stringify(list);
+      if (window.storage && typeof window.storage.set === "function") await window.storage.set("memory-entries", serialized, false);
+      else window.localStorage.setItem("memory-entries", serialized);
+    } catch (error) {}
+  }
+
+  async function cleanupDemoContent() {
+    if (cleanupRunning) return;
+    cleanupRunning = true;
+    try {
+      var list = archiveEntries();
+      var removedIds = [];
+      var clean = list.filter(function (entry) {
+        var id = String(entry && entry.id || "");
+        var demo = id.indexOf(DEMO_ID_PREFIX) === 0;
+        if (demo) removedIds.push(id);
+        return !demo;
+      });
+
+      var photoIds = KNOWN_DEMO_IDS.concat(removedIds).filter(function (id, index, values) {
+        return values.indexOf(id) === index;
+      });
+      await Promise.all(photoIds.map(function (id) { return deleteStoredValue("memory-photo:" + id); }));
+
+      try {
+        photoIds.forEach(function (id) {
+          if (entryPhotoCache && Object.prototype.hasOwnProperty.call(entryPhotoCache, id)) delete entryPhotoCache[id];
+        });
+      } catch (error) {}
+
+      if (clean.length !== list.length) {
+        await saveCleanEntries(clean);
+        try {
+          if (selectedEntryId && String(selectedEntryId).indexOf(DEMO_ID_PREFIX) === 0) selectedEntryId = null;
+        } catch (error) {}
+        lastSignature = "";
+        if (typeof renderContent === "function") renderContent();
+      }
+    } finally {
+      cleanupRunning = false;
+      schedule();
+    }
   }
 
   function ensureStrip() {
@@ -224,8 +291,10 @@ export const MEMORY_ARCHIVE_MENU_SCRIPT = String.raw`<script id="heather-memory-
     patchRenderer("renderYearList");
     patchRenderer("renderContent");
     schedule();
-    window.setTimeout(schedule, 250);
-    window.setTimeout(schedule, 900);
+    void cleanupDemoContent();
+    window.setTimeout(function () { void cleanupDemoContent(); }, 180);
+    window.setTimeout(function () { void cleanupDemoContent(); }, 700);
+    window.setTimeout(function () { void cleanupDemoContent(); }, 1600);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
