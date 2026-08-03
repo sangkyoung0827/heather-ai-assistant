@@ -9,6 +9,7 @@ import { ContextControlError, enrichChatPayloadFromContext, requireContextUser }
 import { retrieveDocumentMemoryContext } from "../../../lib/documents/server";
 import { executeQuickLinkIntent, parseQuickLinkIntent } from "../../../lib/quick-links/server";
 import { DirectCommandRepository } from "../../../lib/intent/direct-command-repository";
+import { executeDirectCommandAction } from "../../../lib/intent/direct-command-skill-executor";
 import { parsePersonalMemoIntent, runPersonalMemoSkill, type PersonalMemoSkillResult } from "../../../lib/personal-memos/server";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent } from "../../../lib/chat/progress-events";
 import { executePersonalHeatherBasic } from "../../../lib/chat/heather-basic-engine";
@@ -133,11 +134,26 @@ async function resolveHeatherChat(request: Request, receivedPayload: ChatRequest
   }
   if (directMatch && !personalDocumentRequest && !personalMemoIntent) {
     report?.("direct_command_check", "completed", 24, { type: "direct_command", name: directMatch.command.canonicalTrigger });
-    usedTools.push("direct_command");
+    const action = await executeDirectCommandAction({
+      request,
+      command: directMatch.command,
+      message: receivedPayload.message,
+      chatType: "personal",
+      signal: request.signal
+    });
+    usedTools.push(...action.usedTools);
     await directCommands.incrementUsage(directMatch.command.id).catch(() => undefined);
     await directCommands.logIntent("direct_command", receivedPayload.message, directMatch.command.id).catch(() => undefined);
     return {
-      response: { message: directMatch.command.response, title: directMatch.command.canonicalTrigger, risk: { level: "low", requiresConfirmation: false, reason: "Saved direct command." }, provider: "direct-command", model: "server" },
+      response: {
+        message: action.message,
+        title: directMatch.command.canonicalTrigger,
+        risk: { level: "low", requiresConfirmation: false, reason: action.skillId ? "Allowlisted direct command skill." : "Saved direct command." },
+        provider: action.provider,
+        model: action.model,
+        cached: action.cached,
+        search: action.skillId && action.sources ? { used: true, skillId: action.skillId, provider: action.provider, cached: Boolean(action.cached), sources: action.sources } : undefined
+      },
       usedTools
     };
   }

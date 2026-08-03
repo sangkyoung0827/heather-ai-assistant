@@ -11,6 +11,7 @@ import { createResearchPlan, providerStage } from "../../../../lib/research/prog
 import { ConversationRepository, createConversationTitle } from "../../../../lib/conversations/repository";
 import { runMatchedSkill, type RuntimeSkillProgress, type RuntimeSource } from "../../../../lib/skills/agent-runtime";
 import { DirectCommandRepository } from "../../../../lib/intent/direct-command-repository";
+import { executeDirectCommandAction } from "../../../../lib/intent/direct-command-skill-executor";
 import { externalDiscoveryUnavailableMessage, formatResearchResponse, verifiedResearchSources, type ResearchSourceReference } from "../../../../lib/research/response";
 import { encodeChatStreamEvent, type ChatProgressEvent, type ChatProgressStage, type ChatProgressStatus, type ChatStreamEvent, type HeatherProgressStage } from "../../../../lib/chat/progress-events";
 import { requireContextUser } from "../../../../lib/context-control/server";
@@ -147,12 +148,25 @@ async function resolveResearchChat(request: Request, payload: ChatRequestPayload
     const directMatch = await directCommands.find(payload.message);
     emit?.("direct_command_check", "completed", { source_type: "direct_command" });
     if (directMatch) {
+      const action = await executeDirectCommandAction({
+        request,
+        command: directMatch.command,
+        message: payload.message,
+        chatType: "research",
+        signal: request.signal
+      });
       await directCommands.incrementUsage(directMatch.command.id);
       await directCommands.logIntent("direct_command", payload.message, directMatch.command.id);
-      const message = formatResearchResponse(directMatch.command.response);
-      const assistant = await conversations.appendAssistant({ conversationId: turn.conversation.id, content: message, source: "direct_command", replyTo: clientMessageId, metadata: { provider: "direct-command", ...executionMetadata(advancedExecution("direct-command")) } });
-      emit?.("response_review", "completed", { source_type: "direct_command" });
-      return completedResponse(message, directMatch.command.canonicalTrigger, "direct-command", "server", turn.conversation.id, turn.userMessage.id, assistant.id);
+      const message = formatResearchResponse(action.message);
+      const assistant = await conversations.appendAssistant({
+        conversationId: turn.conversation.id,
+        content: message,
+        source: action.skillId ? "direct_command_skill" : "direct_command",
+        replyTo: clientMessageId,
+        metadata: { provider: action.provider, model: action.model, direct_command_skill: action.skillId, ...executionMetadata(advancedExecution(action.provider, Boolean(action.skillId))) }
+      });
+      emit?.("response_review", "completed", { source_type: action.skillId ? "academic_search" : "direct_command" });
+      return completedResponse(message, directMatch.command.canonicalTrigger, action.provider, action.model, turn.conversation.id, turn.userMessage.id, assistant.id, false, action.sources);
     }
 
     const runtimePlan = createResearchPlan(payload.message, {
