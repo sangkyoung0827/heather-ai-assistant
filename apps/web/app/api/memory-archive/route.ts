@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { injectMemoryArchiveQuest } from "../../../lib/memory-archive-quest";
+import { injectMemoryArchiveMenu } from "../../../lib/memory-archive-menu";
 
 export const runtime = "nodejs";
 export const dynamic = "force-static";
@@ -264,7 +265,8 @@ function injectMemoryEditorLayout(html: string) {
 
 export async function GET() {
   try {
-    const html = injectMemoryArchiveQuest(injectMemoryEditorLayout(await loadArchiveHtml()));
+    const source = await loadArchiveHtml();
+    const html = injectMemoryArchiveQuest(injectMemoryArchiveMenu(injectMemoryEditorLayout(source)));
     return new Response(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
