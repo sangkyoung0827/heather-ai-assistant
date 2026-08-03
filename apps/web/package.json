@@ -7,7 +7,7 @@
     "build": "next build",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test:intent": "tsx --test tests/direct-command-engine.test.ts",
+    "test:intent": "tsx --test tests/direct-command-engine.test.ts tests/direct-command-skill-executor.test.ts",
     "test:documents": "tsx --test tests/document-parser.test.ts"
   },
   "dependencies": {
