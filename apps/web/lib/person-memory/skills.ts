@@ -122,8 +122,9 @@ async function loadPersonRecords(context: ContextClient, parameters: PersonSkill
     .order("updated_at", { ascending: false })
     .limit(200);
 
-  if (memoError) throw new ContextControlError("인물 메모리를 읽으려면 최신 개인 메모 migration이 필요합니다.", 503);
-  const memoRows = ((memos || []) as MemoRow[]).filter((memo) => matchesMemoFilter(memo, parameters));
+  const memoRows = memoError
+    ? []
+    : ((memos || []) as MemoRow[]).filter((memo) => matchesMemoFilter(memo, parameters));
   const memoIds = memoRows.map((memo) => memo.id);
   const memoById = new Map(memoRows.map((memo) => [memo.id, memo]));
 
@@ -136,30 +137,31 @@ async function loadPersonRecords(context: ContextClient, parameters: PersonSkill
       .neq("status", "deleted")
       .order("created_at", { ascending: false })
       .limit(1000);
-    if (entryError) throw new ContextControlError("인물 메모리 항목을 읽지 못했습니다.", 503);
 
-    for (const entry of (entries || []) as EntryRow[]) {
-      const memo = memoById.get(entry.memo_id);
-      if (!memo) continue;
-      const sections = extractPersonSections(entry.content, parameters.aliases);
-      for (const section of sections) {
+    if (!entryError) {
+      for (const entry of (entries || []) as EntryRow[]) {
+        const memo = memoById.get(entry.memo_id);
+        if (!memo) continue;
+        const sections = extractPersonSections(entry.content, parameters.aliases);
+        for (const section of sections) {
+          records.push({
+            memoTitle: memo.title,
+            content: section,
+            date: entry.effective_date || entry.created_at,
+            source: "personal_memo"
+          });
+        }
+      }
+
+      for (const memo of memoRows) {
+        if (!memo.current_summary || !containsAlias(`${memo.title}\n${memo.current_summary}`, parameters.aliases)) continue;
         records.push({
           memoTitle: memo.title,
-          content: section,
-          date: entry.effective_date || entry.created_at,
+          content: memo.current_summary,
+          date: memo.updated_at,
           source: "personal_memo"
         });
       }
-    }
-
-    for (const memo of memoRows) {
-      if (!memo.current_summary || !containsAlias(`${memo.title}\n${memo.current_summary}`, parameters.aliases)) continue;
-      records.push({
-        memoTitle: memo.title,
-        content: memo.current_summary,
-        date: memo.updated_at,
-        source: "personal_memo"
-      });
     }
   }
 
@@ -182,14 +184,10 @@ async function loadPersonRecords(context: ContextClient, parameters: PersonSkill
 }
 
 function matchesMemoFilter(memo: MemoRow, parameters: PersonSkillParameters) {
-  if (parameters.memoTitle) {
-    const expected = normalize(parameters.memoTitle);
-    const actual = normalize(memo.title);
-    if (actual !== expected && !actual.includes(expected)) return false;
-  }
-  return parameters.memoTitle
-    ? true
-    : containsAlias(`${memo.title}\n${memo.current_summary}`, parameters.aliases);
+  if (!parameters.memoTitle) return true;
+  const expected = normalize(parameters.memoTitle);
+  const actual = normalize(memo.title);
+  return actual === expected || actual.includes(expected);
 }
 
 export function extractPersonSections(content: string, aliases: string[]): string[] {
