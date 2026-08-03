@@ -31,24 +31,28 @@ export type DirectCommandActionResult = {
   sources?: DirectCommandSkillSource[];
 };
 
+type RuntimeSourceInput = {
+  title?: string;
+  url?: string;
+  snippet?: string;
+  provider?: string;
+  published_at?: number | string | null;
+  doi?: string;
+};
+
+type RuntimePayload = {
+  message?: string;
+  overview?: string;
+  themes?: Array<{ title?: string; summary?: string }>;
+  sources?: RuntimeSourceInput[];
+  provider?: string;
+  cached?: boolean;
+};
+
 type RuntimeResult = {
   status?: string;
   skill_id?: string;
-  result?: {
-    message?: string;
-    overview?: string;
-    themes?: Array<{ title?: string; summary?: string }>;
-    sources?: Array<{
-      title?: string;
-      url?: string;
-      snippet?: string;
-      provider?: string;
-      published_at?: number | string | null;
-      doi?: string;
-    }>;
-    provider?: string;
-    cached?: boolean;
-  };
+  result?: RuntimePayload;
   error_code?: string;
 };
 
@@ -184,13 +188,13 @@ function resolveQuery(value: unknown, message: string, canonicalTrigger: string)
   return resolved.slice(0, 4000);
 }
 
-function normalizeSources(input: RuntimeResult["result"] extends infer Result ? Result extends { sources?: infer Sources } ? Sources : never : never): DirectCommandSkillSource[] {
+function normalizeSources(input: RuntimeSourceInput[] | undefined): DirectCommandSkillSource[] {
   if (!Array.isArray(input)) return [];
   return input.flatMap((source) => {
-    const title = String(source?.title || "").trim();
-    const url = String(source?.url || "").trim();
+    const title = String(source.title || "").trim();
+    const url = String(source.url || "").trim();
     if (!title || !/^https?:\/\//i.test(url)) return [];
-    const rawPublishedAt = source?.published_at;
+    const rawPublishedAt = source.published_at;
     const publishedAt = typeof rawPublishedAt === "number"
       ? rawPublishedAt
       : typeof rawPublishedAt === "string" && /^\d+$/.test(rawPublishedAt)
@@ -199,15 +203,15 @@ function normalizeSources(input: RuntimeResult["result"] extends infer Result ? 
     return [{
       title: title.slice(0, 500),
       url: url.slice(0, 2048),
-      snippet: source?.snippet ? String(source.snippet).slice(0, 1200) : undefined,
-      provider: source?.provider ? String(source.provider).slice(0, 100) : undefined,
+      snippet: source.snippet ? String(source.snippet).slice(0, 1200) : undefined,
+      provider: source.provider ? String(source.provider).slice(0, 100) : undefined,
       published_at: Number.isFinite(publishedAt) ? publishedAt : null,
-      doi: source?.doi ? String(source.doi).slice(0, 300) : undefined
+      doi: source.doi ? String(source.doi).slice(0, 300) : undefined
     }];
   }).slice(0, 5);
 }
 
-function formatRuntimeMessage(result: NonNullable<RuntimeResult["result"]>, sources: DirectCommandSkillSource[], locale: "ko" | "en"): string {
+function formatRuntimeMessage(result: RuntimePayload, sources: DirectCommandSkillSource[], locale: "ko" | "en"): string {
   const main = result.message?.trim() || result.overview?.trim() || "";
   const themes = (result.themes || [])
     .flatMap((theme) => theme.title || theme.summary ? [`- ${[theme.title, theme.summary].filter(Boolean).join(": ")}`] : [])
