@@ -1,0 +1,41 @@
+name: Browser-local Heather engine check
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: browser-local-engine-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Apply production patches
+        run: npm run prebuild
+
+      - name: Verify browser engine patch idempotency
+        run: python3 scripts/connect-browser-local-engine.py
+
+      - name: Type-check workspaces
+        run: npm run typecheck
+
+      - name: Run intent and memory tests
+        run: npm run test:intent -w @heather/web
+
+      - name: Build production web application
+        run: npm run build -w @heather/web

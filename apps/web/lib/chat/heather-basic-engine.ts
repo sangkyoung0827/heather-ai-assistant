@@ -1,7 +1,7 @@
 import type { ChatExecutionMetadata, ChatResponsePayload, ChatType } from "@heather/core";
 import { generateConversationTitle } from "@heather/core";
 
-const LOCAL_ENGINE_NOT_CONFIGURED = "LOCAL_ENGINE_NOT_CONFIGURED";
+const LOCAL_ENGINE_NOT_CONFIGURED = "BROWSER_LOCAL_ENGINE_REQUIRED";
 
 function pendingResponse(message: string, chatType: ChatType): ChatResponsePayload {
   const execution: ChatExecutionMetadata = {
@@ -15,20 +15,20 @@ function pendingResponse(message: string, chatType: ChatType): ChatResponsePaylo
   const korean = /[\u3131-\uD79D]/.test(message);
   return {
     message: korean
-      ? "헤더 기본 엔진은 현재 연결 준비 중입니다. 고급추론으로 전환하면 기존 모델을 사용할 수 있습니다."
-      : "Heather basic engine is being prepared. Switch to Advanced reasoning to use the existing model.",
+      ? "헤더 기본 엔진은 브라우저의 WebGPU에서 실행됩니다. 최신 Chrome 등 WebGPU 지원 브라우저에서 다시 시도해주세요."
+      : "Heather Basic runs through WebGPU inside the browser. Try again in a WebGPU-capable browser such as a current version of Chrome.",
     title: generateConversationTitle(message),
-    risk: { level: "low", requiresConfirmation: false, reason: "Local engine is not configured." },
+    risk: { level: "low", requiresConfirmation: false, reason: "Browser-local engine must run on the client." },
     execution
   };
 }
 
-/** Intentionally isolated from every provider, search, and tool path. */
+/** Server fallback only. Normal Heather Basic responses run in the browser. */
 export function executePersonalHeatherBasic(message: string): ChatResponsePayload {
   return pendingResponse(message, "general");
 }
 
-/** Intentionally isolated from every provider, search, and tool path. */
+/** Server fallback only. Normal Heather Basic responses run in the browser. */
 export function executeResearcherHeatherBasic(message: string): ChatResponsePayload {
   return pendingResponse(message, "research");
 }
