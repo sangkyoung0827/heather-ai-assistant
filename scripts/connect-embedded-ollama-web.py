@@ -10,13 +10,14 @@ def update(path: str, replacements: list[tuple[str, str, str]]) -> None:
     content = target.read_text(encoding="utf-8")
     changed = False
     for label, old, new in replacements:
-        if new in content:
-            continue
         count = content.count(old)
-        if count != 1:
-            raise RuntimeError(f"{path} / {label}: expected one match, found {count}")
-        content = content.replace(old, new, 1)
-        changed = True
+        if count == 1:
+            content = content.replace(old, new, 1)
+            changed = True
+            continue
+        if count == 0 and new in content:
+            continue
+        raise RuntimeError(f"{path} / {label}: expected one original or one applied replacement, found {count}")
     if changed:
         target.write_text(content, encoding="utf-8")
         print(f"{path}: embedded Ollama web integration applied")
