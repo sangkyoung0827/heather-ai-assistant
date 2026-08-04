@@ -1,5 +1,8 @@
 import { createClient, type User } from "@supabase/supabase-js";
 
+export const HEATHER_OWNER_USER_ID = "6ce9c496-e85f-4931-b6f4-737a7f2fd4d8";
+export const HEATHER_OWNER_EMAIL = "waterfallingsound0827@gmail.com";
+
 export class HeatherOwnerAccessError extends Error {
   constructor(message = "Not found.", readonly status = 404) {
     super(message);
@@ -7,7 +10,11 @@ export class HeatherOwnerAccessError extends Error {
 }
 
 export async function getAuthenticatedRequestUser(request: Request): Promise<User | null> {
-  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
+  return getAuthenticatedUserFromAuthorization(request.headers.get("authorization"));
+}
+
+export async function getAuthenticatedUserFromAuthorization(authorization: string | null): Promise<User | null> {
+  const token = authorization?.replace(/^Bearer\s+/i, "").trim();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!token || !url || !anonKey) return null;
@@ -20,19 +27,15 @@ export async function getAuthenticatedRequestUser(request: Request): Promise<Use
   return error || !data.user ? null : data.user;
 }
 
+export function isConfiguredHeatherOwner(user: Pick<User, "id" | "email"> | null): boolean {
+  if (!user) return false;
+  return user.id === HEATHER_OWNER_USER_ID
+    && user.email?.trim().toLocaleLowerCase() === HEATHER_OWNER_EMAIL;
+}
+
 export async function getHeatherOwner(request: Request): Promise<User | null> {
   const user = await getAuthenticatedRequestUser(request);
-  if (!user) return null;
-
-  const configuredId = process.env.HEATHER_OWNER_USER_ID?.trim();
-  const configuredEmail = process.env.HEATHER_OWNER_EMAIL?.trim().toLocaleLowerCase();
-
-  // Direct commands are intentionally fail-closed. Until at least one immutable
-  // owner identifier is configured, no account receives owner access.
-  if (!configuredId && !configuredEmail) return null;
-  if (configuredId && user.id !== configuredId) return null;
-  if (configuredEmail && user.email?.toLocaleLowerCase() !== configuredEmail) return null;
-  return user;
+  return isConfiguredHeatherOwner(user) ? user : null;
 }
 
 export async function requireHeatherOwner(request: Request): Promise<User> {
