@@ -15,6 +15,10 @@ on:
       - "package.json"
       - ".github/workflows/embedded-ollama-check.yml"
 
+concurrency:
+  group: embedded-ollama-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
