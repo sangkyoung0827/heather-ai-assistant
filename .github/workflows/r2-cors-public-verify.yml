@@ -1,0 +1,54 @@
+name: Verify Heather R2 public CORS
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/r2-cors-public-verify.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HEATHER_ORIGIN: https://heather-ai-assistant.vercel.app
+      PUBLIC_BASE: https://pub-bf31b59c04aa4617a9ff7347507329ea.r2.dev
+    steps:
+      - name: Verify CORS on required public objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            "manifests/heather-standard-v1.json"
+            "models/qwen2.5-3b-instruct-q4f16_1/v1.0.0/mlc-chat-config.json"
+            "libs/webllm-v0_2_84/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm"
+          )
+          for path in "${paths[@]}"; do
+            verified=0
+            for attempt in $(seq 1 20); do
+              nonce="$(date +%s%N)-${attempt}"
+              url="${PUBLIC_BASE}/${path}?corscheck=${nonce}"
+              curl --fail --silent --show-error --location \
+                -H "Origin: ${HEATHER_ORIGIN}" \
+                -H 'Cache-Control: no-cache' \
+                -D /tmp/headers.txt \
+                -o /dev/null \
+                "${url}"
+              tr -d '\r' < /tmp/headers.txt > /tmp/headers-clean.txt
+              echo "--- ${path} attempt ${attempt} ---"
+              grep -Ei '^(HTTP/|access-control-|accept-ranges:|content-type:|content-length:|cache-control:|vary:)' /tmp/headers-clean.txt || true
+              if grep -Eiq "^access-control-allow-origin: (${HEATHER_ORIGIN}|\*)$" /tmp/headers-clean.txt; then
+                verified=1
+                break
+              fi
+              sleep 10
+            done
+            if [[ "${verified}" != "1" ]]; then
+              echo "CORS header did not appear for ${path}." >&2
+              exit 1
+            fi
+          done
+          echo "Heather R2 public CORS is active on all required objects."
