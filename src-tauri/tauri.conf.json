@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.heather.aiassistant",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:tauri-web",
     "devUrl": "http://localhost:3000",
     "beforeBuildCommand": "npm run build:tauri-web",
     "frontendDist": "../apps/web/out-tauri"
@@ -28,6 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"]
+    "targets": ["app"],
+    "resources": {
+      "resources/embedded-ollama": "embedded-ollama"
+    }
   }
 }
