@@ -53,6 +53,12 @@ if rail_button not in content:
 
 content = replace_once(
     content,
+    '  if (id === "sensitive") return "Sensitive memory";\n  return rail[id === "direct" ? "direct" : id];',
+    '  if (id === "sensitive") return "Sensitive memory";\n  if (id === "youtubeEditor") return "YouTube Auto Editor";\n  return rail[id === "direct" ? "direct" : id];',
+    "rail label",
+)
+content = replace_once(
+    content,
     'memoryArchive: ["추억 저장소", "사진과 일기로 나의 역사를 기록하는 공간입니다."], projects:',
     'memoryArchive: ["추억 저장소", "사진과 일기로 나의 역사를 기록하는 공간입니다."], youtubeEditor: ["YouTube 자동 편집", "영상 분석, 자동 컷, Whisper 캡션, 썸네일과 업로드를 관리합니다."], projects:',
     "workspace metadata",
