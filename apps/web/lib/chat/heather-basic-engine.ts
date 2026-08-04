@@ -1,36 +1,36 @@
 import type { ChatExecutionMetadata, ChatResponsePayload, ChatType } from "@heather/core";
 import { generateConversationTitle } from "@heather/core";
 
-const LOCAL_ENGINE_NOT_CONFIGURED = "LOCAL_ENGINE_NOT_CONFIGURED";
+const EMBEDDED_ENGINE_DESKTOP_REQUIRED = "EMBEDDED_ENGINE_DESKTOP_REQUIRED";
 
-function pendingResponse(message: string, chatType: ChatType): ChatResponsePayload {
+function desktopRequiredResponse(message: string, chatType: ChatType): ChatResponsePayload {
   const execution: ChatExecutionMetadata = {
     requestedExecutionMode: "HEATHER_BASIC",
     actualExecutionMode: "HEATHER_BASIC",
     chatType,
     localEngineUsed: false,
     externalLlmUsed: false,
-    errorCode: LOCAL_ENGINE_NOT_CONFIGURED
+    errorCode: EMBEDDED_ENGINE_DESKTOP_REQUIRED
   };
   const korean = /[\u3131-\uD79D]/.test(message);
   return {
     message: korean
-      ? "헤더 기본 엔진은 현재 연결 준비 중입니다. 고급추론으로 전환하면 기존 모델을 사용할 수 있습니다."
-      : "Heather basic engine is being prepared. Switch to Advanced reasoning to use the existing model.",
+      ? "헤더 기본 엔진은 Heather 데스크톱 앱에 내장된 로컬 런타임에서만 실행됩니다. 현재 웹 화면에서는 고급추론을 사용하거나 Heather 데스크톱 앱을 실행해주세요."
+      : "Heather basic engine runs only inside the local runtime embedded in the Heather desktop app. Use Advanced reasoning here or open the Heather desktop app.",
     title: generateConversationTitle(message),
-    risk: { level: "low", requiresConfirmation: false, reason: "Local engine is not configured." },
+    risk: { level: "low", requiresConfirmation: false, reason: "The embedded local runtime is only available inside the desktop application." },
     execution
   };
 }
 
-/** Intentionally isolated from every provider, search, and tool path. */
+/** The Tauri client intercepts HEATHER_BASIC before this server-only fallback. */
 export function executePersonalHeatherBasic(message: string): ChatResponsePayload {
-  return pendingResponse(message, "general");
+  return desktopRequiredResponse(message, "general");
 }
 
-/** Intentionally isolated from every provider, search, and tool path. */
+/** The Tauri client intercepts HEATHER_BASIC before this server-only fallback. */
 export function executeResearcherHeatherBasic(message: string): ChatResponsePayload {
-  return pendingResponse(message, "research");
+  return desktopRequiredResponse(message, "research");
 }
 
-export { LOCAL_ENGINE_NOT_CONFIGURED };
+export { EMBEDDED_ENGINE_DESKTOP_REQUIRED };
