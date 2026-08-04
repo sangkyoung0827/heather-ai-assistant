@@ -18,6 +18,7 @@ OLLAMA_VERSION = os.environ.get("HEATHER_EMBEDDED_OLLAMA_VERSION", "v0.30.8")
 DARWIN_ARCHIVE_SHA256 = "62a68eacb27dde8d61560fd3bf4c5669c141f5482c5668ce7328420e871088e6"
 DARWIN_ARCHIVE_URL = f"https://github.com/ollama/ollama/releases/download/{OLLAMA_VERSION}/Ollama-darwin.zip"
 RESOURCE_PREFIX = "Ollama.app/Contents/Resources/"
+REQUIRED_EXECUTABLES = ("ollama", "llama-server")
 
 OLLAMA_LICENSE = """MIT License
 
@@ -88,17 +89,52 @@ def safe_resource_path(filename: str) -> Path | None:
     return relative
 
 
+def archived_unix_mode(member: zipfile.ZipInfo) -> int:
+    # The upper 16 bits contain the original Unix st_mode when the ZIP entry
+    # was created on a Unix-like system. Keep only permission and special bits.
+    return (member.external_attr >> 16) & 0o7777
+
+
+def restore_archived_mode(member: zipfile.ZipInfo, target: Path) -> None:
+    mode = archived_unix_mode(member)
+    if mode:
+        target.chmod(mode)
+
+
+def ensure_required_executables(root: Path, extracted_files: list[str]) -> None:
+    missing: list[str] = []
+    for executable_name in REQUIRED_EXECUTABLES:
+        executable = root / executable_name
+        if not executable.is_file():
+            missing.append(executable_name)
+            continue
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    if missing:
+        preview = ", ".join(extracted_files[:40]) or "no resource files"
+        raise SystemExit(
+            "The Ollama archive does not contain the required runtime executables "
+            f"{', '.join(missing)}. Extracted entries: {preview}"
+        )
+
+
+def prepared_runtime_is_valid(manifest_path: Path, archive_digest: str) -> bool:
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if manifest.get("version") != OLLAMA_VERSION or manifest.get("archive_sha256") != archive_digest:
+        return False
+    return all((DESTINATION / name).is_file() and os.access(DESTINATION / name, os.X_OK) for name in REQUIRED_EXECUTABLES)
+
+
 def extract_runtime(archive: Path) -> None:
     archive_digest = sha256(archive)
     manifest_path = DESTINATION / "embedded-runtime.json"
-    if manifest_path.is_file() and (DESTINATION / "ollama").is_file():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if manifest.get("version") == OLLAMA_VERSION and manifest.get("archive_sha256") == archive_digest:
-                print("Heather embedded Ollama runtime is already prepared.")
-                return
-        except (OSError, ValueError):
-            pass
+    if prepared_runtime_is_valid(manifest_path, archive_digest):
+        print("Heather embedded Ollama runtime is already prepared.")
+        return
 
     with tempfile.TemporaryDirectory(prefix="heather-ollama-") as temporary:
         staging = Path(temporary) / "embedded-ollama"
@@ -116,20 +152,15 @@ def extract_runtime(archive: Path) -> None:
                 target = staging / relative
                 if member.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
+                    restore_archived_mode(member, target)
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with bundle.open(member) as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output)
+                restore_archived_mode(member, target)
                 extracted_files.append(relative.as_posix())
 
-        executable = staging / "ollama"
-        if not executable.is_file():
-            preview = ", ".join(extracted_files[:40]) or "no resource files"
-            raise SystemExit(
-                "The Ollama archive does not contain the expected Resources/ollama runtime. "
-                f"Extracted entries: {preview}"
-            )
-        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        ensure_required_executables(staging, extracted_files)
         (staging / "THIRD_PARTY_OLLAMA_LICENSE.txt").write_text(OLLAMA_LICENSE, encoding="utf-8")
         (staging / "embedded-runtime.json").write_text(
             json.dumps(
@@ -139,6 +170,7 @@ def extract_runtime(archive: Path) -> None:
                     "archive": DARWIN_ARCHIVE_URL,
                     "archive_sha256": archive_digest,
                     "resource_file_count": len(extracted_files),
+                    "required_executables": list(REQUIRED_EXECUTABLES),
                     "managed_by": "Heather AI Assistant",
                 },
                 indent=2,
@@ -147,7 +179,8 @@ def extract_runtime(archive: Path) -> None:
             encoding="utf-8",
         )
         shutil.rmtree(DESTINATION, ignore_errors=True)
-        shutil.copytree(staging, DESTINATION)
+        shutil.copytree(staging, DESTINATION, copy_function=shutil.copy2)
+        ensure_required_executables(DESTINATION, extracted_files)
         print(f"Extracted {len(extracted_files)} official Ollama resource files.")
         for item in extracted_files[:40]:
             print(f"  - {item}")
