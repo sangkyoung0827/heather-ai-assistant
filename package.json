@@ -14,8 +14,9 @@
     "lint": "npm run lint -w @heather/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "prepare:embedded-ollama": "python3 scripts/prepare-embedded-ollama.py",
+    "prepare:tauri-build": "python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py && npm run prepare:embedded-ollama",
     "dev:tauri-web": "python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py && npm run prepare:embedded-ollama && npm run dev",
-    "build:tauri-web": "python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py && npm run prepare:embedded-ollama && NEXT_PUBLIC_TAURI_BUILD=true npm run build -w @heather/web && rm -rf apps/web/out-tauri && mv apps/web/out apps/web/out-tauri",
+    "build:tauri-web": "npm run prepare:tauri-build",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"
   },
