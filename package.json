@@ -21,7 +21,7 @@
     "desktop:build": "tauri build"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.48.1",
