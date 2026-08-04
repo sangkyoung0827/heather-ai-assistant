@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     }
 
     const context = await requireContextUser(request);
-    const directCommands = new DirectCommandRepository();
+    const directCommands = new DirectCommandRepository(context.user.id);
     const directMatch = await directCommands.find(payload.message).catch(() => null);
     if (directMatch) {
       const action = await executeDirectCommandAction({
