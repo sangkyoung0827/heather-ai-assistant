@@ -51,8 +51,8 @@ end $$;
 create policy "documents own rows"
 on public.documents
 for all
-using (user_id = auth.uid())
-with check (user_id = auth.uid());
+using (documents.user_id = auth.uid())
+with check (documents.user_id = auth.uid());
 
 create policy "document versions through owned document"
 on public.document_versions
@@ -61,7 +61,7 @@ using (
   exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = document_versions.document_id
       and document.user_id = auth.uid()
   )
 )
@@ -69,7 +69,7 @@ with check (
   exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = document_versions.document_id
       and document.user_id = auth.uid()
   )
 );
@@ -81,7 +81,7 @@ using (
   exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = document_extractions.document_id
       and document.user_id = auth.uid()
   )
 )
@@ -89,7 +89,7 @@ with check (
   exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = document_extractions.document_id
       and document.user_id = auth.uid()
   )
 );
@@ -101,7 +101,7 @@ using (
   exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = document_chunks.document_id
       and document.user_id = auth.uid()
   )
 )
@@ -109,7 +109,7 @@ with check (
   exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = document_chunks.document_id
       and document.user_id = auth.uid()
   )
 );
@@ -118,20 +118,20 @@ create policy "memory candidates own document rows"
 on public.memory_candidates
 for all
 using (
-  user_id = auth.uid()
+  memory_candidates.user_id = auth.uid()
   and exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = memory_candidates.document_id
       and document.user_id = auth.uid()
   )
 )
 with check (
-  user_id = auth.uid()
+  memory_candidates.user_id = auth.uid()
   and exists (
     select 1
     from public.documents document
-    where document.id = document_id
+    where document.id = memory_candidates.document_id
       and document.user_id = auth.uid()
   )
 );
