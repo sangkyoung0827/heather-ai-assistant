@@ -28,7 +28,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Set up Rust
@@ -48,6 +48,9 @@ jobs:
 
       - name: Run intent tests
         run: npm run test:intent -w @heather/web
+
+      - name: Build production web application
+        run: npm run build -w @heather/web
 
       - name: Check Tauri Rust bridge
         run: cargo check --manifest-path src-tauri/Cargo.toml
