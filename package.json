@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @heather/web",
-    "prebuild": "python3 scripts/build-owner-security-patch.py && python3 scripts/fix-direct-command-access-readiness.py && python3 scripts/harden-account-session-state.py && python3 scripts/harden-document-memory.py",
+    "prebuild": "python3 scripts/build-owner-security-patch.py && python3 scripts/harden-account-session-state.py && python3 scripts/harden-document-memory.py && python3 scripts/fix-direct-command-access-readiness.py",
     "build": "npm run build -w @heather/web",
     "lint": "npm run lint -w @heather/web",
     "typecheck": "npm run typecheck --workspaces --if-present"
