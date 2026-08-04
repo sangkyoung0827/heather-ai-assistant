@@ -6,11 +6,30 @@ Heather Basic must generate answers without depending on a separately installed 
 
 The desktop application therefore owns all three local-inference layers:
 
-1. the Ollama runtime executable and runner libraries packaged inside the Heather `.app` bundle;
+1. the Ollama runtime executable and official inference resources packaged inside the Heather `.app` bundle;
 2. a private loopback server process started and stopped by Heather;
 3. a Heather-owned model directory inside the application data directory.
 
-The Vercel web application does not contain this runtime. On the web, selecting Heather Basic fails closed and explains that the desktop application is required. It never silently sends a Basic request to NVIDIA, OpenAI, or another external model.
+The Vercel web application does not contain this runtime. On a normal browser, selecting Heather Basic fails closed and explains that the desktop application is required. It never silently sends a Basic request to NVIDIA, OpenAI, or another external model.
+
+## Desktop frontend and server features
+
+Heather's web application contains authenticated Next.js API routes, Supabase-backed memory, document processing, and research endpoints. Those routes cannot be converted into a static frontend without removing existing functionality.
+
+The production Tauri application therefore loads the exact production Heather origin:
+
+```text
+https://heather-ai-assistant.vercel.app
+```
+
+Tauri IPC access is not granted broadly. The application uses command permissions generated at build time and remote capabilities restricted to:
+
+- the exact production Heather origin;
+- the `main` or `floating` window label;
+- macOS;
+- the explicit command list required by each window.
+
+The Ollama runtime and model execution remain local inside the desktop application. The remote frontend provides the UI and existing authenticated server functions.
 
 ## Runtime packaging
 
@@ -20,12 +39,12 @@ Run:
 npm run prepare:embedded-ollama
 ```
 
-The preparation script downloads the pinned official macOS Ollama release, verifies its SHA-256 digest, and extracts only:
+The preparation script downloads the pinned official macOS Ollama release, verifies its SHA-256 digest, and preserves the complete official `Ollama.app/Contents/Resources` subtree. This includes the CLI, llama server, CPU and Metal/MLX runner libraries, model support libraries, and any version-specific inference resources.
 
-- the `ollama` CLI runtime;
-- the sibling `lib/` runner directory required for inference;
+The script additionally writes:
+
 - the Ollama MIT license;
-- a small runtime manifest recording the pinned version and checksum.
+- a runtime manifest containing the pinned version, source URL, SHA-256 digest, and extracted resource count.
 
 Generated binaries are intentionally excluded from Git. Tauri copies `src-tauri/resources/embedded-ollama` into the built application resources.
 
@@ -37,7 +56,7 @@ Heather uses an application-owned model directory under its local application-da
 <Heather app local data>/embedded-ollama/models
 ```
 
-On first launch, Heather checks `~/.ollama/models`. When legacy model files exist, Heather creates hard links into its own model directory where the filesystem allows it, and copies files otherwise. Ollama manifests reference content-addressed blobs, so the Heather copy remains usable after the legacy directory is removed.
+On first launch, Heather checks `~/.ollama/models`. When legacy model files exist, Heather creates hard links into its own model directory where the filesystem allows it, and copies files otherwise. Ollama manifests reference content-addressed blobs, so the Heather model tree remains addressable after the legacy directory is removed.
 
 If the configured model is not already present, Heather's embedded runtime downloads it directly into the Heather-owned directory. The separately installed Ollama application is not required for that download.
 
@@ -60,8 +79,8 @@ The process is not exposed on the default global Ollama port. Heather tracks the
 For `HEATHER_BASIC` in the Tauri desktop app:
 
 ```text
-Chat UI
-  -> Tauri ollama_chat command
+Heather production UI in the desktop WebView
+  -> origin-restricted Tauri ollama_chat command
   -> Heather-owned embedded Ollama process
   -> Heather-owned model store
   -> local answer
@@ -85,7 +104,7 @@ npm install
 npm run desktop:build
 ```
 
-The Tauri build command prepares the runtime, applies the deterministic source integration patches, exports the web frontend, compiles the Rust bridge, and bundles the runtime resources into Heather.
+The Tauri build command applies the deterministic source integration patches, prepares the pinned runtime, compiles the Rust bridge, and bundles the runtime resources into Heather. It does not statically export the Next.js application or remove its server routes.
 
 ## Independence verification on the target Mac
 
