@@ -1,0 +1,47 @@
+name: Vercel-compatible Linux build
+
+on:
+  push:
+    branches:
+      - feat/connect-heather-basic-ollama
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vercel.json"
+      - ".github/workflows/vercel-linux-check.yml"
+
+concurrency:
+  group: vercel-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Vercel production build command
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://hpawrqmcgdnjvbehkwfw.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_yQobZj1MVGykEdqUo3M8iA_kgoz6xgR
+        run: npm run build
+
+      - name: Verify Next output directory
+        run: test -f apps/web/.next/BUILD_ID && test -f apps/web/.next/routes-manifest.json
