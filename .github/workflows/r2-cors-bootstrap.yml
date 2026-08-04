@@ -1,0 +1,203 @@
+name: Securely configure Heather R2 CORS
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/r2-cors-bootstrap.yml"
+      - ".r2-cors-bootstrap/credentials-envelope.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-cors-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BOOTSTRAP_BRANCH: agent/r2-cors-bootstrap-20260805
+      ENVELOPE_PATH: .r2-cors-bootstrap/credentials-envelope.json
+      HEATHER_ORIGIN: https://heather-ai-assistant.vercel.app
+      MANIFEST_PATH: manifests/heather-standard-v1.json
+      MODEL_CONFIG_PATH: models/qwen2.5-3b-instruct-q4f16_1/v1.0.0/mlc-chat-config.json
+      MODEL_LIB_PATH: libs/webllm-v0_2_84/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Detect encrypted payload commit
+        id: payload
+        shell: bash
+        run: |
+          if [[ -f "${ENVELOPE_PATH}" ]]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Skip duplicate payload-triggered run
+        if: steps.payload.outputs.present == 'true'
+        run: echo "The original watcher run will consume the encrypted deployment payload."
+
+      - name: Generate ephemeral deployment key
+        if: steps.payload.outputs.present == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /tmp/r2-cors-private.pem
+          openssl pkey -in /tmp/r2-cors-private.pem -pubout -out /tmp/r2-cors-public.pem
+          chmod 600 /tmp/r2-cors-private.pem
+
+      - name: Publish encryption public key
+        if: steps.payload.outputs.present == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-cors-public-key
+          path: /tmp/r2-cors-public.pem
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Wait for encrypted credentials
+        if: steps.payload.outputs.present == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${ENVELOPE_PATH}?ref=${BOOTSTRAP_BRANCH}"
+          found=0
+          for attempt in $(seq 1 180); do
+            status=$(curl --silent --show-error --location \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/vnd.github+json" \
+              --output /tmp/envelope-response.json \
+              --write-out '%{http_code}' \
+              "${api}")
+            if [[ "${status}" == "200" ]]; then
+              jq -r '.content' /tmp/envelope-response.json | tr -d '\n' | base64 --decode > /tmp/credentials-envelope.json
+              found=1
+              break
+            fi
+            sleep 10
+          done
+          if [[ "${found}" != "1" ]]; then
+            echo "Encrypted credentials were not received before timeout." >&2
+            exit 1
+          fi
+
+      - name: Install cryptography tools
+        if: steps.payload.outputs.present == 'false'
+        run: python -m pip install --disable-pip-version-check cryptography awscli
+
+      - name: Decrypt and mask credentials
+        if: steps.payload.outputs.present == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64
+          import json
+          from pathlib import Path
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+          envelope = json.loads(Path('/tmp/credentials-envelope.json').read_text(encoding='utf-8'))
+          private_key = serialization.load_pem_private_key(
+              Path('/tmp/r2-cors-private.pem').read_bytes(),
+              password=None,
+          )
+          aes_key = private_key.decrypt(
+              base64.b64decode(envelope['encryptedKey']),
+              padding.OAEP(
+                  mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                  algorithm=hashes.SHA256(),
+                  label=None,
+              ),
+          )
+          plaintext = AESGCM(aes_key).decrypt(
+              base64.b64decode(envelope['nonce']),
+              base64.b64decode(envelope['ciphertext']),
+              b'heather-r2-cors-bootstrap-v1',
+          )
+          payload = json.loads(plaintext.decode('utf-8'))
+          required = ['accountId', 'accessKeyId', 'secretAccessKey', 'bucketName', 'publicBaseUrl']
+          missing = [name for name in required if not payload.get(name)]
+          if missing:
+              raise SystemExit(f"Missing encrypted fields: {', '.join(missing)}")
+          Path('/tmp/r2-credentials.json').write_text(json.dumps(payload), encoding='utf-8')
+          PY
+
+          account_id=$(jq -r '.accountId' /tmp/r2-credentials.json)
+          access_key=$(jq -r '.accessKeyId' /tmp/r2-credentials.json)
+          secret_key=$(jq -r '.secretAccessKey' /tmp/r2-credentials.json)
+          bucket=$(jq -r '.bucketName' /tmp/r2-credentials.json)
+          public_base=$(jq -r '.publicBaseUrl' /tmp/r2-credentials.json)
+          echo "::add-mask::${access_key}"
+          echo "::add-mask::${secret_key}"
+          {
+            echo "CLOUDFLARE_ACCOUNT_ID=${account_id}"
+            echo "AWS_ACCESS_KEY_ID=${access_key}"
+            echo "AWS_SECRET_ACCESS_KEY=${secret_key}"
+            echo "AWS_DEFAULT_REGION=auto"
+            echo "AWS_EC2_METADATA_DISABLED=true"
+            echo "R2_BUCKET_NAME=${bucket}"
+            echo "R2_PUBLIC_BASE_URL=${public_base}"
+          } >> "${GITHUB_ENV}"
+          rm -f /tmp/r2-credentials.json /tmp/credentials-envelope.json
+
+      - name: Apply production browser CORS policy
+        if: steps.payload.outputs.present == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          cat > /tmp/r2-cors.json <<JSON
+          {
+            "CORSRules": [
+              {
+                "AllowedOrigins": ["${HEATHER_ORIGIN}"],
+                "AllowedMethods": ["GET", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges"],
+                "MaxAgeSeconds": 3600
+              }
+            ]
+          }
+          JSON
+          aws --endpoint-url "${endpoint}" s3api put-bucket-cors \
+            --bucket "${R2_BUCKET_NAME}" \
+            --cors-configuration file:///tmp/r2-cors.json
+          aws --endpoint-url "${endpoint}" s3api get-bucket-cors \
+            --bucket "${R2_BUCKET_NAME}" > /tmp/remote-cors.json
+          jq -e --arg origin "${HEATHER_ORIGIN}" \
+            '.CORSRules | any(.AllowedOrigins | index($origin))' /tmp/remote-cors.json >/dev/null
+
+      - name: Verify public objects and browser CORS headers
+        if: steps.payload.outputs.present == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_base="${R2_PUBLIC_BASE_URL%/}"
+          for path in "${MANIFEST_PATH}" "${MODEL_CONFIG_PATH}" "${MODEL_LIB_PATH}"; do
+            url="${public_base}/${path}"
+            curl --fail --silent --show-error --location --retry 8 --retry-delay 3 \
+              -H "Origin: ${HEATHER_ORIGIN}" \
+              -D /tmp/headers.txt \
+              -o /dev/null \
+              "${url}"
+            tr -d '\r' < /tmp/headers.txt > /tmp/headers-clean.txt
+            grep -Eiq "^access-control-allow-origin: (${HEATHER_ORIGIN}|\*)$" /tmp/headers-clean.txt
+            grep -Eiq '^accept-ranges: bytes$' /tmp/headers-clean.txt
+          done
+          echo "Heather R2 CORS and public model endpoints are verified."
+
+      - name: Remove ephemeral private material
+        if: always()
+        shell: bash
+        run: rm -f /tmp/r2-cors-private.pem /tmp/r2-cors-public.pem /tmp/r2-cors.json /tmp/remote-cors.json /tmp/headers.txt /tmp/headers-clean.txt
