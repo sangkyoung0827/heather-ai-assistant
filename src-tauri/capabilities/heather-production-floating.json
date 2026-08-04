@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/remote-schema.json",
+  "identifier": "heather-production-floating",
+  "description": "Allows the exact Heather production origin in the floating launcher to focus the main Heather window and use core event APIs only.",
+  "windows": ["floating"],
+  "local": true,
+  "remote": {
+    "urls": ["https://heather-ai-assistant.vercel.app/*"]
+  },
+  "platforms": ["macOS"],
+  "permissions": [
+    "core:default",
+    "allow-show-heather"
+  ]
+}
