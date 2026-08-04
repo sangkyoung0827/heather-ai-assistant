@@ -34,11 +34,11 @@ type MemoryState = { commands: DirectCommandRecord[]; patterns: Map<string, Quer
 
 declare global {
   // eslint-disable-next-line no-var
-  var heatherIntentMemory: MemoryState | undefined;
+  var heatherIntentMemoryByOwner: Map<string, MemoryState> | undefined;
 }
 
-const memory = globalThis.heatherIntentMemory ?? { commands: [], patterns: new Map<string, QueryPattern>(), processedMessageIds: new Set<string>() };
-globalThis.heatherIntentMemory = memory;
+const ownerMemory = globalThis.heatherIntentMemoryByOwner ?? new Map<string, MemoryState>();
+globalThis.heatherIntentMemoryByOwner = ownerMemory;
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_TRIGGER_LENGTH = 500;
@@ -48,17 +48,23 @@ const MAX_IMPORT_COMMANDS = 200;
 
 export class DirectCommandRepository {
   private readonly client: SupabaseClient | null;
+  private readonly memory: MemoryState;
+  private ownershipPrepared = false;
 
-  constructor() {
+  constructor(private readonly ownerUserId: string) {
+    if (!isUuid(ownerUserId)) throw new Error("Direct command owner is not configured.");
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     this.client = url && key ? createClient(url, key, { auth: { persistSession: false } }) : null;
+    this.memory = ownerMemory.get(ownerUserId) ?? { commands: [], patterns: new Map(), processedMessageIds: new Set() };
+    ownerMemory.set(ownerUserId, this.memory);
   }
 
   get configured() { return Boolean(this.client); }
 
   async list(search = ""): Promise<DirectCommandRecord[]> {
-    const commands = this.client ? await this.listSupabase() : memory.commands;
+    await this.prepareOwnership();
+    const commands = this.client ? await this.listSupabase() : this.memory.commands;
     return filterCommands(commands, search);
   }
 
@@ -83,10 +89,11 @@ export class DirectCommandRepository {
     if (!this.client) {
       const now = new Date().toISOString();
       const record: DirectCommandRecord = { id: randomUUID(), ...prepared, createdBy, createdAt: now, updatedAt: now, usageCount: 0, lastUsedAt: null };
-      memory.commands.unshift(record);
+      this.memory.commands.unshift(record);
       return record;
     }
     const { data, error } = await this.client.from("direct_commands").insert({
+      owner_user_id: this.ownerUserId,
       title: prepared.title,
       question: prepared.canonicalTrigger,
       canonical_trigger: prepared.canonicalTrigger,
@@ -99,7 +106,7 @@ export class DirectCommandRepository {
     if (error) throw error;
     const id = String(data.id);
     if (prepared.triggers.length) {
-      const { error: triggerError } = await this.client.from("direct_command_triggers").insert(prepared.triggers.map((trigger) => ({ command_id: id, trigger, normalized_trigger: normalizeIntentText(trigger) })));
+      const { error: triggerError } = await this.client.from("direct_command_triggers").insert(prepared.triggers.map((trigger) => ({ owner_user_id: this.ownerUserId, command_id: id, trigger, normalized_trigger: normalizeIntentText(trigger) })));
       if (triggerError) throw triggerError;
     }
     return (await this.list()).find((command) => command.id === id) as DirectCommandRecord;
@@ -111,42 +118,36 @@ export class DirectCommandRepository {
     const prepared = validateInput({ ...existing, ...input, triggers: input.triggers ?? existing.triggers });
     if (!this.client) {
       const record = { ...existing, ...prepared, updatedAt: new Date().toISOString() };
-      memory.commands = memory.commands.map((command) => command.id === id ? record : command);
+      this.memory.commands = this.memory.commands.map((command) => command.id === id ? record : command);
       return record;
     }
-    const { error } = await this.client.from("direct_commands").update({ title: prepared.title, question: prepared.canonicalTrigger, canonical_trigger: prepared.canonicalTrigger, normalized_question: normalizeIntentText(prepared.canonicalTrigger), response: prepared.response, enabled: prepared.enabled, tags: prepared.tags }).eq("id", id);
+    const { error } = await this.client.from("direct_commands").update({ title: prepared.title, question: prepared.canonicalTrigger, canonical_trigger: prepared.canonicalTrigger, normalized_question: normalizeIntentText(prepared.canonicalTrigger), response: prepared.response, enabled: prepared.enabled, tags: prepared.tags }).eq("id", id).eq("owner_user_id", this.ownerUserId);
     if (error) throw error;
-    const { error: deleteError } = await this.client.from("direct_command_triggers").delete().eq("command_id", id);
+    const { error: deleteError } = await this.client.from("direct_command_triggers").delete().eq("command_id", id).eq("owner_user_id", this.ownerUserId);
     if (deleteError) throw deleteError;
     if (prepared.triggers.length) {
-      const { error: triggerError } = await this.client.from("direct_command_triggers").insert(prepared.triggers.map((trigger) => ({ command_id: id, trigger, normalized_trigger: normalizeIntentText(trigger) })));
+      const { error: triggerError } = await this.client.from("direct_command_triggers").insert(prepared.triggers.map((trigger) => ({ owner_user_id: this.ownerUserId, command_id: id, trigger, normalized_trigger: normalizeIntentText(trigger) })));
       if (triggerError) throw triggerError;
     }
     return (await this.list()).find((command) => command.id === id) as DirectCommandRecord;
   }
 
   async remove(id: string) {
-    if (!this.client) { memory.commands = memory.commands.filter((command) => command.id !== id); return; }
-    const { error } = await this.client.from("direct_commands").delete().eq("id", id);
+    if (!this.client) { this.memory.commands = this.memory.commands.filter((command) => command.id !== id); return; }
+    await this.prepareOwnership();
+    const { error } = await this.client.from("direct_commands").delete().eq("id", id).eq("owner_user_id", this.ownerUserId);
     if (error) throw error;
   }
 
   async incrementUsage(id: string) {
     if (!this.client) {
-      memory.commands = memory.commands.map((command) => command.id === id ? { ...command, usageCount: command.usageCount + 1, lastUsedAt: new Date().toISOString() } : command);
+      this.memory.commands = this.memory.commands.map((command) => command.id === id ? { ...command, usageCount: command.usageCount + 1, lastUsedAt: new Date().toISOString() } : command);
       return;
     }
-    // Keep usage accounting tied to the table schema rather than an optional database RPC.
-    const { data: command, error: readError } = await this.client
-      .from("direct_commands")
-      .select("usage_count")
-      .eq("id", id)
-      .single();
+    await this.prepareOwnership();
+    const { data: command, error: readError } = await this.client.from("direct_commands").select("usage_count").eq("id", id).eq("owner_user_id", this.ownerUserId).single();
     if (readError) throw readError;
-    const { error } = await this.client.from("direct_commands").update({
-      usage_count: Number(command.usage_count || 0) + 1,
-      last_used_at: new Date().toISOString()
-    }).eq("id", id);
+    const { error } = await this.client.from("direct_commands").update({ usage_count: Number(command.usage_count || 0) + 1, last_used_at: new Date().toISOString() }).eq("id", id).eq("owner_user_id", this.ownerUserId);
     if (error) throw error;
   }
 
@@ -194,16 +195,17 @@ export class DirectCommandRepository {
   }
 
   async recordRepeatedFallback({ message, response, messageId }: { message: string; response: string; messageId?: string }) {
-    if (messageId && memory.processedMessageIds.has(messageId)) return { promoted: false };
-    if (messageId) { memory.processedMessageIds.add(messageId); if (memory.processedMessageIds.size > 1000) memory.processedMessageIds.delete(memory.processedMessageIds.values().next().value as string); }
+    if (messageId && this.memory.processedMessageIds.has(messageId)) return { promoted: false };
+    if (messageId) { this.memory.processedMessageIds.add(messageId); if (this.memory.processedMessageIds.size > 1000) this.memory.processedMessageIds.delete(this.memory.processedMessageIds.values().next().value as string); }
     const normalized = normalizeRepeatedQuery(message);
     if (!normalized) return { promoted: false };
     const cutoff = new Date(Date.now() - AUTO_LEARNING_WINDOW_DAYS * 86400000).toISOString();
-    const persisted = this.client ? await this.client.from("query_patterns").select("id, normalized_query, representative_query, examples, occurrence_count, latest_response, status, updated_at").gte("updated_at", cutoff).limit(250) : null;
+    await this.prepareOwnership();
+    const persisted = this.client ? await this.client.from("query_patterns").select("id, normalized_query, representative_query, examples, occurrence_count, latest_response, status, updated_at").eq("owner_user_id", this.ownerUserId).gte("updated_at", cutoff).limit(250) : null;
     if (persisted?.error) throw persisted.error;
     const rows = ((persisted?.data || []) as Array<Record<string, unknown>>).map((row) => ({ id: String(row.id), normalized: String(row.normalized_query), examples: Array.isArray(row.examples) ? row.examples.map(String) : [], count: Number(row.occurrence_count || 0), response: String(row.latest_response || ""), status: String(row.status || "observed"), lastSeenAt: String(row.updated_at || "") }));
     const candidate = rows.find((pattern) => pattern.normalized === normalized) || rows.filter((pattern) => pattern.status === "observed").map((pattern) => ({ pattern, score: repeatedQuerySimilarity(normalized, pattern.normalized) })).filter(({ score }) => score >= REPEATED_QUERY_SIMILARITY_THRESHOLD).sort((a, b) => b.score - a.score)[0]?.pattern;
-    const pattern = candidate || memory.patterns.get(normalized) || { normalized, examples: [], count: 0, response: "", status: "observed" };
+    const pattern = candidate || this.memory.patterns.get(normalized) || { normalized, examples: [], count: 0, response: "", status: "observed" };
     if (pattern.status === "promoted" || pattern.status === "excluded" || pattern.status === "ignored") return { promoted: false };
     const consistent = !pattern.response || responseSimilarity(pattern.response, response) >= RESPONSE_CONSISTENCY_THRESHOLD;
     pattern.count = consistent ? pattern.count + 1 : 1;
@@ -211,10 +213,10 @@ export class DirectCommandRepository {
     if (!pattern.examples.includes(message)) pattern.examples.push(message);
     pattern.examples = pattern.examples.slice(-MAX_QUERY_VARIANTS);
     pattern.lastSeenAt = new Date().toISOString();
-    memory.patterns.set(pattern.normalized, pattern);
+    this.memory.patterns.set(pattern.normalized, pattern);
     if (this.client) {
-      const payload = { normalized_query: pattern.normalized, representative_query: pattern.examples[0] || message, examples: pattern.examples, occurrence_count: pattern.count, latest_response: response, status: "observed" };
-      const query = pattern.id ? this.client.from("query_patterns").update(payload).eq("id", pattern.id) : this.client.from("query_patterns").upsert(payload, { onConflict: "normalized_query" });
+      const payload = { owner_user_id: this.ownerUserId, normalized_query: pattern.normalized, representative_query: pattern.examples[0] || message, examples: pattern.examples, occurrence_count: pattern.count, latest_response: response, status: "observed" };
+      const query = pattern.id ? this.client.from("query_patterns").update(payload).eq("id", pattern.id).eq("owner_user_id", this.ownerUserId) : this.client.from("query_patterns").upsert(payload, { onConflict: "owner_user_id,normalized_query" });
       const { error } = await query;
       if (error) throw error;
     }
@@ -235,29 +237,53 @@ export class DirectCommandRepository {
 
   async recordFallback(message: string, response: string, eligible: boolean) { if (!eligible) return { promoted: false }; return this.recordRepeatedFallback({ message, response }); }
 
-  private async markPattern(pattern: QueryPattern, status: "promoted" | "excluded") { pattern.status = status; if (!this.client) return; const { error } = pattern.id ? await this.client.from("query_patterns").update({ status }).eq("id", pattern.id) : await this.client.from("query_patterns").update({ status }).eq("normalized_query", pattern.normalized); if (error) throw error; }
+  private async markPattern(pattern: QueryPattern, status: "promoted" | "excluded") {
+    pattern.status = status;
+    if (!this.client) return;
+    const { error } = pattern.id
+      ? await this.client.from("query_patterns").update({ status }).eq("id", pattern.id).eq("owner_user_id", this.ownerUserId)
+      : await this.client.from("query_patterns").update({ status }).eq("normalized_query", pattern.normalized).eq("owner_user_id", this.ownerUserId);
+    if (error) throw error;
+  }
+
   private async excludePattern(pattern: QueryPattern, _reason: string) { await this.markPattern(pattern, "excluded"); return { promoted: false, excluded: true }; }
 
   async logIntent(result: "direct_command" | "fallback", message: string, commandId?: string) {
     if (!this.client) return;
+    await this.prepareOwnership();
     const { createHash } = await import("node:crypto");
-    const { error } = await this.client.from("intent_events").insert({ input_hash: createHash("sha256").update(normalizeIntentText(message)).digest("hex"), result, command_id: commandId || null });
+    const { error } = await this.client.from("intent_events").insert({ owner_user_id: this.ownerUserId, input_hash: createHash("sha256").update(normalizeIntentText(message)).digest("hex"), result, command_id: commandId || null });
     if (error) throw error;
   }
 
   async storageStatus(): Promise<StorageStatus> {
     if (!this.client) return { provider: "local", connected: false, readable: false, writable: false };
-    const read = await this.client.from("direct_commands").select("id", { head: true, count: "exact" }).limit(1);
-    const triggerRead = await this.client.from("direct_command_triggers").select("id", { head: true, count: "exact" }).limit(1);
+    await this.prepareOwnership();
+    const read = await this.client.from("direct_commands").select("id", { head: true, count: "exact" }).eq("owner_user_id", this.ownerUserId).limit(1);
+    const triggerRead = await this.client.from("direct_command_triggers").select("id", { head: true, count: "exact" }).eq("owner_user_id", this.ownerUserId).limit(1);
     if (read.error || triggerRead.error) return { provider: "unavailable", connected: false, readable: false, writable: false };
-    // This updates no rows because the sentinel UUID is never assigned to a user command.
-    // It verifies table write permission without creating or changing user data.
-    const write = await this.client.from("direct_commands").update({ updated_at: new Date().toISOString() }).eq("id", "00000000-0000-0000-0000-000000000000");
+    const write = await this.client.from("direct_commands").update({ updated_at: new Date().toISOString() }).eq("id", "00000000-0000-0000-0000-000000000000").eq("owner_user_id", this.ownerUserId);
     return { provider: write.error ? "unavailable" : "supabase", connected: !write.error, readable: true, writable: !write.error };
   }
 
+  private async prepareOwnership() {
+    if (!this.client || this.ownershipPrepared) return;
+    const claimCommands = await this.client.from("direct_commands").update({ owner_user_id: this.ownerUserId }).is("owner_user_id", null);
+    if (claimCommands.error) throw new Error("Apply the owner-only direct command migration before using Direct Commands.");
+    await this.client.from("query_patterns").update({ owner_user_id: this.ownerUserId }).is("owner_user_id", null);
+    await this.client.from("intent_events").update({ owner_user_id: this.ownerUserId }).is("owner_user_id", null);
+    const { data: commands, error } = await this.client.from("direct_commands").select("id").eq("owner_user_id", this.ownerUserId).limit(5000);
+    if (error) throw error;
+    const ids = (commands || []).map((row) => String(row.id));
+    for (let index = 0; index < ids.length; index += 500) {
+      const { error: triggerError } = await this.client.from("direct_command_triggers").update({ owner_user_id: this.ownerUserId }).in("command_id", ids.slice(index, index + 500)).is("owner_user_id", null);
+      if (triggerError) throw triggerError;
+    }
+    this.ownershipPrepared = true;
+  }
+
   private async listSupabase(): Promise<DirectCommandRecord[]> {
-    const { data: rows, error } = await this.client!.from("direct_commands").select("*, direct_command_triggers(trigger)").order("created_at", { ascending: false });
+    const { data: rows, error } = await this.client!.from("direct_commands").select("*, direct_command_triggers(trigger)").eq("owner_user_id", this.ownerUserId).order("created_at", { ascending: false });
     if (error) throw error;
     return (rows || []).map((row: Record<string, unknown>) => ({
       id: String(row.id), title: String(row.title), canonicalTrigger: String(row.canonical_trigger || row.question),
@@ -271,13 +297,7 @@ export class DirectCommandRepository {
 function filterCommands(commands: DirectCommandRecord[], search: string) {
   const keyword = normalizeIntentText(search);
   if (!keyword) return commands;
-  return commands.filter((command) => normalizeIntentText([
-    command.title,
-    command.canonicalTrigger,
-    ...command.triggers,
-    ...command.tags,
-    command.response
-  ].join(" ")).includes(keyword));
+  return commands.filter((command) => normalizeIntentText([command.title, command.canonicalTrigger, ...command.triggers, ...command.tags, command.response].join(" ")).includes(keyword));
 }
 
 function encodeCursor(offset: number) { return Buffer.from(String(offset), "utf8").toString("base64url"); }
@@ -311,10 +331,7 @@ function uniqueTriggers(canonicalTrigger: string, triggers: string[]) {
 }
 
 function normalizeRepeatedQuery(value: string) {
-  return normalizeIntentText(value)
-    .replace(/개발\s*(현황|진행\s*상황|어디까지)/g, "개발 진행")
-    .replace(/\b(current|status|progress)\b/g, "progress")
-    .trim();
+  return normalizeIntentText(value).replace(/개발\s*(현황|진행\s*상황|어디까지)/g, "개발 진행").replace(/\b(current|status|progress)\b/g, "progress").trim();
 }
 
 function repeatedQuerySimilarity(left: string, right: string) {
@@ -343,3 +360,4 @@ function hasOpposingMeaning(left: Set<string>, right: Set<string>) {
 }
 
 function truncate(value: string, length: number) { return value.length > length ? `${value.slice(0, length - 1)}…` : value; }
+function isUuid(value: string) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
