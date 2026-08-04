@@ -1,3 +1,5 @@
+import { directCommandAuthorizationHeaders } from "./security/direct-command-client";
+
 export type DirectCommand = {
   id: string;
   title: string;
@@ -76,7 +78,16 @@ export function readLegacyLocalStorageCommands(): DirectCommandInput[] {
 }
 
 async function request<T = unknown>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers || {}) } });
+  const authorization = await directCommandAuthorizationHeaders();
+  const response = await fetch(url, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...authorization,
+      ...(init?.headers || {})
+    }
+  });
   if (response.status === 204) return undefined as T;
   const payload = await response.json() as T & { error?: string };
   if (!response.ok || payload.error) throw new Error(payload.error || "Direct command request failed.");
