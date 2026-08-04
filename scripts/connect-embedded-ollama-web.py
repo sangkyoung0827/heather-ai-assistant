@@ -38,11 +38,11 @@ update(
     const cachedResponse = payload.executionMode !== "HEATHER_BASIC"''',
             '''  async function resolveHeatherResponse(payload: ChatRequestPayload, onEvent: (event: ChatStreamEvent) => void, signal: AbortSignal): Promise<ApiChatResponse> {
     if (payload.executionMode === "HEATHER_BASIC" && canUseEmbeddedOllama()) {
-      onEvent({ type: "progress", data: createClientProgressEvent("request_received", "completed", 12, "embedded-ollama") });
-      onEvent({ type: "progress", data: createClientProgressEvent("local_engine_status", "active", 34, "Heather embedded Ollama") });
+      onEvent({ type: "progress", data: createClientProgressEvent("request_received", "completed", 12, "llm") });
+      onEvent({ type: "progress", data: createClientProgressEvent("local_engine_status", "active", 34, "llm") });
       const response = await runEmbeddedOllamaChat(payload, "general", signal);
-      onEvent({ type: "progress", data: createClientProgressEvent("response_composition", "completed", 92, response.model) });
-      onEvent({ type: "progress", data: createClientProgressEvent("completed", "completed", 100, "embedded-ollama") });
+      onEvent({ type: "progress", data: createClientProgressEvent("response_composition", "completed", 92, "llm") });
+      onEvent({ type: "progress", data: createClientProgressEvent("completed", "completed", 100, "llm") });
       return response;
     }
 
@@ -60,13 +60,22 @@ update(
             'import { DEFAULT_CHAT_EXECUTION_MODE, isExecutionModeSelectorEnabledInBrowser } from "../../../lib/chat/execution-mode";\nimport { canUseEmbeddedOllama, persistEmbeddedResearchTurn, runEmbeddedOllamaChat } from "../../../lib/chat/embedded-ollama-client";\n',
         ),
         (
-            "research execution mode before uploads",
+            "research execution mode declaration",
+            '''  async function send() {
+    const message = draft.trim();
+    if ((!message && !attachments.length) || isSending || lockRef.current) return;''',
+            '''  async function send() {
+    const message = draft.trim();
+    if ((!message && !attachments.length) || isSending || lockRef.current) return;
+    const executionMode = activeConversation?.executionMode || newConversationExecutionMode;''',
+        ),
+        (
+            "research attachment guard",
             '''    const files = attachments.map((attachment) => attachment.file);
     setAttachments([]); applyOptimistic(userMessage);
     try {
       let conversationId = activeConversation?.id?.startsWith("pending-") ? undefined : activeConversation?.id;''',
             '''    const files = attachments.map((attachment) => attachment.file);
-    const executionMode = activeConversation?.executionMode || newConversationExecutionMode;
     setAttachments([]); applyOptimistic(userMessage);
     try {
       if (executionMode === "HEATHER_BASIC" && canUseEmbeddedOllama() && files.length) {
@@ -86,12 +95,12 @@ update(
       const session = await getSupabaseBrowserClient()?.auth.getSession();''',
             '''      const payload: ChatRequestPayload = { message, messageId: userMessage.id, clientMessageId: userMessage.id, conversationId, conversation: activeConversation || undefined, messageAlreadyPersisted, settings, memories: researchMemories, projects, teachings: [], automationRecipes: [], executionMode };
       if (executionMode === "HEATHER_BASIC" && canUseEmbeddedOllama()) {
-        setProgressEvents((current) => [...current, createClientProgressEvent("local_engine_status", "active", 34, "Heather embedded Ollama")]);
+        setProgressEvents((current) => [...current, createClientProgressEvent("local_engine_status", "active", 34)]);
         const local = await runEmbeddedOllamaChat(payload, "research", controller.signal);
         const responseMessage = cleanResearchDisplayText(local.message);
         applyOptimistic(createMessage("assistant", responseMessage, "text", { provider: local.provider, model: local.model, execution: local.execution }));
         const persisted = await persistEmbeddedResearchTurn(payload, { ...local, message: responseMessage }, controller.signal);
-        setProgressEvents((current) => [...current, createClientProgressEvent("completed", "completed", 100, "embedded-ollama")]);
+        setProgressEvents((current) => [...current, createClientProgressEvent("completed", "completed", 100)]);
         await refreshAfterSend(persisted.conversationId);
         return;
       }
