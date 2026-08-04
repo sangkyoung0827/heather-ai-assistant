@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { CheckCircle2, FileText, FolderUp, RotateCcw } from "lucide-react";
 import type { HeatherLanguage } from "@heather/core";
+import { directCommandAuthorizationHeaders } from "../../../lib/security/direct-command-client";
 
 type Summary = { total: number; create: number; merge: number; duplicate: number; error: number };
 type PreviewItem = { input?: { title: string; canonicalTrigger: string; triggers?: string[]; response: string; tags?: string[] }; status: "create" | "merge" | "duplicate" | "error"; error?: string };
@@ -25,29 +26,40 @@ export function BulkDirectCommandImportPanel({ locale = "ko" }: { locale?: Heath
     if (next.size > 10 * 1024 * 1024) return setNotice(copy.sizeLimit);
     setFile(next);
   }
+
   async function previewFile() {
     if (!file) return;
     setWorking(true); setNotice("");
     try {
       const data = new FormData(); data.set("file", file);
-      const response = await fetch("/api/direct-commands/bulk-import/preview", { method: "POST", body: data });
+      const headers = await directCommandAuthorizationHeaders();
+      const response = await fetch("/api/direct-commands/bulk-import/preview", { method: "POST", headers, body: data, cache: "no-store" });
       const payload = await response.json() as Preview & { error?: string };
       if (!response.ok || payload.error) throw new Error(payload.error || copy.analysisFailed);
-      setPreview(payload); setSelected(new Set(payload.items.flatMap((item, index) => item.status === "create" || item.status === "merge" ? [index] : [])));
+      setPreview(payload);
+      setSelected(new Set(payload.items.flatMap((item, index) => item.status === "create" || item.status === "merge" ? [index] : [])));
     } catch (error) { setNotice(error instanceof Error ? error.message : copy.analysisFailed); }
     finally { setWorking(false); }
   }
+
   async function commit() {
     if (!preview) return;
     setWorking(true); setNotice("");
     try {
-      const response = await fetch("/api/direct-commands/bulk-import/commit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: preview.importId, selectedIndexes: [...selected] }) });
+      const authorization = await directCommandAuthorizationHeaders();
+      const response = await fetch("/api/direct-commands/bulk-import/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authorization },
+        body: JSON.stringify({ importId: preview.importId, selectedIndexes: [...selected] }),
+        cache: "no-store"
+      });
       const payload = await response.json() as { summary?: Summary; error?: string };
       if (!response.ok || payload.error || !payload.summary) throw new Error(payload.error || copy.commitFailed);
       setResult(payload.summary); setPreview(null);
     } catch (error) { setNotice(error instanceof Error ? error.message : copy.commitFailed); }
     finally { setWorking(false); }
   }
+
   function reset() { setFile(null); setPreview(null); setResult(null); setNotice(""); setSelected(new Set()); if (inputRef.current) inputRef.current.value = ""; }
   function toggle(index: number) { setSelected((current) => { const next = new Set(current); next.has(index) ? next.delete(index) : next.add(index); return next; }); }
 

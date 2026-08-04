@@ -4,11 +4,13 @@ import { parseBulkDirectCommandFile, type BulkFileType } from "../../../../../li
 import { storeBulkImportSession } from "../../../../../lib/intent/bulk-import-session";
 import { DirectCommandRepository } from "../../../../../lib/intent/direct-command-repository";
 import { errorResponse } from "../../../../../lib/intent/direct-command-api";
+import { requireHeatherOwner } from "../../../../../lib/security/heather-owner";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const owner = await requireHeatherOwner(request);
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw new Error("지원 파일을 선택하세요.");
@@ -16,11 +18,11 @@ export async function POST(request: Request) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const fileType = detectFileType(file.name, file.type, bytes);
     const parsed = await parseBulkDirectCommandFile({ fileType, bytes });
-    const preview = previewBulkImport(parsed.inputs, await new DirectCommandRepository().list());
+    const preview = previewBulkImport(parsed.inputs, await new DirectCommandRepository(owner.id).list());
     const items = preview.items.map((item, index) => item.status === "error" && parsed.errors.find((error) => error.index === index + 1) ? { ...item, error: parsed.errors.find((error) => error.index === index + 1)!.message } : item);
     const summary = { ...preview.summary, error: items.filter((item) => item.status === "error").length };
-    const session = storeBulkImportSession({ inputs: parsed.inputs, items, summary });
-    return NextResponse.json({ importId: session.id, file: { name: file.name, type: fileType, size: file.size, ...parsed.metadata }, summary, items, errors: [...parsed.errors, ...items.flatMap((item, index) => item.status === "error" ? [{ index: index + 1, message: item.error || "형식이 올바르지 않습니다." }] : [])] });
+    const session = storeBulkImportSession({ ownerUserId: owner.id, inputs: parsed.inputs, items, summary });
+    return NextResponse.json({ importId: session.id, file: { name: file.name, type: fileType, size: file.size, ...parsed.metadata }, summary, items, errors: [...parsed.errors, ...items.flatMap((item, index) => item.status === "error" ? [{ index: index + 1, message: item.error || "형식이 올바르지 않습니다." }] : [])] }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return errorResponse(error); }
 }
 

@@ -1,0 +1,50 @@
+name: Apply owner security patch
+
+on:
+  push:
+    branches:
+      - security/owner-only-direct-commands
+    paths:
+      - .github/workflows/apply-owner-security-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out security branch
+        uses: actions/checkout@v4
+        with:
+          ref: security/owner-only-direct-commands
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply deterministic patch
+        run: python3 scripts/apply-owner-security-patch.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run intent and security tests
+        run: npm run test:intent -w @heather/web
+
+      - name: Run web typecheck
+        run: npm run typecheck -w @heather/web
+
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web supabase/migrations/014_owner_only_direct_commands_and_memory_isolation.sql
+          git diff --cached --quiet && exit 0
+          git commit -m "security: isolate direct commands and personal memory by account"
+          git push origin HEAD:security/owner-only-direct-commands
+
+# This workflow is intentionally path-scoped and runs once when this file changes.
