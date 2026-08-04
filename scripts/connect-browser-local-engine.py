@@ -10,7 +10,12 @@ def update(path: str, replacements: list[tuple[str, str, str]]) -> None:
     content = target.read_text(encoding="utf-8")
     changed = False
     for label, old, new in replacements:
-        if new.startswith(old) and new in content:
+        # A contraction can contain its final form inside the original source,
+        # so it must consume the original before treating the shorter result as
+        # an already-applied marker. All additive and normal rewrites can use
+        # the complete replacement as an unambiguous idempotency marker.
+        contraction = new in old and old not in new
+        if not contraction and new in content:
             continue
         count = content.count(old)
         if count == 1:
@@ -44,6 +49,11 @@ update(
             "browser request parse",
             '  const receivedPayload = await request.json() as ChatRequestPayload;\n',
             '  const receivedPayload = await request.json() as BrowserLocalChatPayload;\n',
+        ),
+        (
+            "browser resolver payload type",
+            'async function resolveHeatherChat(request: Request, receivedPayload: ChatRequestPayload, report?: ProgressReporter): Promise<ResolvedChat> {\n',
+            'async function resolveHeatherChat(request: Request, receivedPayload: BrowserLocalChatPayload, report?: ProgressReporter): Promise<ResolvedChat> {\n',
         ),
         (
             "browser preflight mode gate",
@@ -110,7 +120,12 @@ update(
       return response;
     }
 
-    const cachedResponse = payload.executionMode !== "HEATHER_BASIC"''',
+    const cachedResponse = payload.settings.cacheResponses''',
+        ),
+        (
+            "personal cache write after basic return",
+            '    if (payload.executionMode !== "HEATHER_BASIC" && payload.settings.cacheResponses',
+            '    if (payload.settings.cacheResponses',
         ),
     ],
 )
