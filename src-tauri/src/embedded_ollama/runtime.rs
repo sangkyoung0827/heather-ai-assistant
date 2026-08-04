@@ -61,8 +61,25 @@ pub fn ensure_running(
         .map_err(|error| error.to_string())?;
     let log_copy = log.try_clone().map_err(|error| error.to_string())?;
 
+    let runtime_dir = runtime_path
+        .parent()
+        .ok_or_else(|| "Heather embedded runtime directory is invalid.".to_string())?;
+    let inherited_path = std::env::var_os("PATH").unwrap_or_default();
+    let augmented_path = std::env::join_paths(
+        std::iter::once(runtime_dir.to_path_buf()).chain(std::env::split_paths(&inherited_path)),
+    )
+    .map_err(|error| format!("Heather embedded runtime PATH could not be prepared: {error}"))?;
+
     let mut process = Command::new(&runtime_path)
         .arg("serve")
+        .current_dir(runtime_dir)
+        .env("PATH", augmented_path)
+        // Ollama 0.30+ separates the server from llama-server. Because Heather
+        // relocates the official Resources tree under its own app bundle, the
+        // runner directory must be explicit rather than inferred from an
+        // Ollama.app bundle path.
+        .env("OLLAMA_RUNNERS_DIR", runtime_dir)
+        .env("DYLD_LIBRARY_PATH", runtime_dir)
         .env("OLLAMA_HOST", format!("{HOST}:{port}"))
         .env("OLLAMA_MODELS", &models_dir)
         .env("OLLAMA_KEEP_ALIVE", "10m")
