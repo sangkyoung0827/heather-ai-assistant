@@ -10,6 +10,11 @@ def update(path: str, replacements: list[tuple[str, str, str]]) -> None:
     content = target.read_text(encoding="utf-8")
     changed = False
     for label, old, new in replacements:
+        # Additive replacements intentionally contain the original text. Detect
+        # the fully-applied form before counting the original substring, while
+        # still allowing deletion/rewrite replacements to consume their source.
+        if new.startswith(old) and new in content:
+            continue
         count = content.count(old)
         if count == 1:
             content = content.replace(old, new, 1)
