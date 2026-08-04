@@ -18,9 +18,8 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 
 # Direct Command authorization has three states: checking, allowed, and denied.
-# A route change remounts HeatherWorkspace, so treating the initial checking state
-# as denied causes an authorized owner to be redirected before the access request
-# finishes. Track readiness separately and redirect only after verification.
+# Route changes remount HeatherWorkspace. The temporary checking state must not
+# be interpreted as a denial before the server access request has completed.
 replace_once(
     "apps/web/lib/use-heather-data.ts",
     '  const [directCommandsAllowed, setDirectCommandsAllowed] = useState(false);\n',
@@ -28,44 +27,66 @@ replace_once(
 )
 replace_once(
     "apps/web/lib/use-heather-data.ts",
-    '''      setUser(null);
+    '''    if (!client) {
+      const generation = ++authGeneration.current;
+      setUser(null);
+      setMemories([]);
       setDirectCommandsAllowed(false);
-      setAuthReady(true);''',
-    '''      setUser(null);
+      setAuthReady(true);
+      setConversations([]);
+      void reloadConversations(generation);
+      return;
+    }''',
+    '''    if (!client) {
+      const generation = ++authGeneration.current;
+      setUser(null);
+      setMemories([]);
       setDirectCommandsAllowed(false);
       setDirectCommandsReady(true);
-      setAuthReady(true);''',
+      setAuthReady(true);
+      setConversations([]);
+      void reloadConversations(generation);
+      return;
+    }''',
 )
 replace_once(
     "apps/web/lib/use-heather-data.ts",
     '''      setUser(restoredUser);
+      setMemories([]);
       setDirectCommandsAllowed(false);
       setAuthReady(true);''',
     '''      setUser(restoredUser);
+      setMemories([]);
       setDirectCommandsAllowed(false);
       setDirectCommandsReady(!restoredUser);
       setAuthReady(true);''',
 )
 replace_once(
     "apps/web/lib/use-heather-data.ts",
-    '''      if (restoredUser) void canAccessDirectCommands().then((allowed) => { if (active) setDirectCommandsAllowed(allowed); }).catch(() => { if (active) setDirectCommandsAllowed(false); });''',
     '''      if (restoredUser) void canAccessDirectCommands().then((allowed) => {
-        if (!active) return;
+        if (active && generation === authGeneration.current) setDirectCommandsAllowed(allowed);
+      }).catch(() => {
+        if (active && generation === authGeneration.current) setDirectCommandsAllowed(false);
+      });''',
+    '''      if (restoredUser) void canAccessDirectCommands().then((allowed) => {
+        if (!active || generation !== authGeneration.current) return;
         setDirectCommandsAllowed(allowed);
         setDirectCommandsReady(true);
       }).catch(() => {
-        if (!active) return;
+        if (!active || generation !== authGeneration.current) return;
         setDirectCommandsAllowed(false);
         setDirectCommandsReady(true);
       });''',
 )
 replace_once(
     "apps/web/lib/use-heather-data.ts",
-    '''    setDirectCommandsAllowed(false);
-  }, []);''',
-    '''    setDirectCommandsAllowed(false);
+    '''    setConversations([]);
+    setDirectCommandsAllowed(false);
+    const client = getSupabaseBrowserClient();''',
+    '''    setConversations([]);
+    setDirectCommandsAllowed(false);
     setDirectCommandsReady(true);
-  }, []);''',
+    const client = getSupabaseBrowserClient();''',
 )
 replace_once(
     "apps/web/lib/use-heather-data.ts",
