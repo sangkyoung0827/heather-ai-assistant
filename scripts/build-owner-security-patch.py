@@ -39,6 +39,63 @@ source = source.replace(
 namespace = {"__file__": str(ORIGINAL), "__name__": "__main__"}
 exec(compile(source, str(ORIGINAL), "exec"), namespace)
 
+# Pin Direct Command ownership to one exact Supabase identity. These identifiers
+# are not secrets; authorization still requires a valid Supabase access token.
+owner_path = ROOT / "apps/web/lib/security/heather-owner.ts"
+owner_content = owner_path.read_text(encoding="utf-8")
+old_owner_matcher = '''export function isConfiguredHeatherOwner(user: Pick<User, "id" | "email"> | null): boolean {
+  if (!user) return false;
+  const configuredId = process.env.HEATHER_OWNER_USER_ID?.trim();
+  const configuredEmail = process.env.HEATHER_OWNER_EMAIL?.trim().toLocaleLowerCase();
+  // Fail closed until at least one exact Supabase identity is configured.
+  if (!configuredId && !configuredEmail) return false;
+  if (configuredId && user.id !== configuredId) return false;
+  if (configuredEmail && user.email?.toLocaleLowerCase() !== configuredEmail) return false;
+  return true;
+}
+'''
+new_owner_matcher = '''export const HEATHER_OWNER_USER_ID = "6ce9c496-e85f-4931-b6f4-737a7f2fd4d8";
+export const HEATHER_OWNER_EMAIL = "waterfallingsound0827@gmail.com";
+
+export function isConfiguredHeatherOwner(user: Pick<User, "id" | "email"> | null): boolean {
+  if (!user) return false;
+  return user.id === HEATHER_OWNER_USER_ID
+    && user.email?.trim().toLocaleLowerCase() === HEATHER_OWNER_EMAIL;
+}
+'''
+if old_owner_matcher in owner_content:
+    owner_content = owner_content.replace(old_owner_matcher, new_owner_matcher, 1)
+elif new_owner_matcher not in owner_content:
+    raise SystemExit("Could not pin the Heather owner identity.")
+owner_path.write_text(owner_content, encoding="utf-8")
+print("Heather owner identity pinned to the waterfalling account.")
+
+# Keep the generated owner-access tests aligned with the pinned identity.
+test_path = ROOT / "apps/web/tests/heather-owner-access.test.ts"
+if test_path.exists():
+    test_path.write_text(
+        '''import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  HEATHER_OWNER_EMAIL,
+  HEATHER_OWNER_USER_ID,
+  isConfiguredHeatherOwner
+} from "../lib/security/heather-owner";
+
+test("anonymous and mismatched accounts are denied", () => {
+  assert.equal(isConfiguredHeatherOwner(null), false);
+  assert.equal(isConfiguredHeatherOwner({ id: HEATHER_OWNER_USER_ID, email: "other@example.com" }), false);
+  assert.equal(isConfiguredHeatherOwner({ id: "22222222-2222-4222-8222-222222222222", email: HEATHER_OWNER_EMAIL }), false);
+});
+
+test("only the exact waterfalling Supabase identity is accepted", () => {
+  assert.equal(isConfiguredHeatherOwner({ id: HEATHER_OWNER_USER_ID, email: HEATHER_OWNER_EMAIL }), true);
+  assert.equal(isConfiguredHeatherOwner({ id: HEATHER_OWNER_USER_ID, email: HEATHER_OWNER_EMAIL.toUpperCase() }), true);
+});
+''',
+        encoding="utf-8",
+    )
+
 # Defense in depth: even a call site missed by the route transformations receives
 # an empty, non-writable repository instead of the owner's command corpus.
 path = ROOT / "apps/web/lib/intent/direct-command-repository.ts"
