@@ -46,3 +46,5 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "security: isolate direct commands and personal memory by account"
           git push origin HEAD:security/owner-only-direct-commands
+
+# This workflow is intentionally path-scoped and runs once when this file changes.
