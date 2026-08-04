@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,12 +43,14 @@ content = replace_once(
     '  if (pathname.startsWith("/memory-archive")) return "memoryArchive";\n  if (pathname.startsWith("/youtube-editor")) return "youtubeEditor";\n',
     "route resolver",
 )
-content = replace_once(
-    content,
-    '<div className="rail-actions">{NODES.map((node) => <RailButton key={node.id} icon={node.icon} label={railLabel(node.id, t)} active={active === node.id} onClick={() => onNavigate(node.path)} />)}</div>',
-    '<div className="rail-actions">{NODES.map((node) => <RailButton key={node.id} icon={node.icon} label={railLabel(node.id, t)} active={active === node.id} onClick={() => onNavigate(node.path)} />)}<RailButton icon={Clapperboard} label={settings.defaultLanguage === "ko" ? "YouTube 자동 편집" : "YouTube Auto Editor"} active={active === "youtubeEditor"} onClick={() => onNavigate("/youtube-editor")} /></div>',
-    "left rail button",
-)
+
+rail_button = '<RailButton icon={Clapperboard} label={settings.defaultLanguage === "ko" ? "YouTube 자동 편집" : "YouTube Auto Editor"} active={active === "youtubeEditor"} onClick={() => onNavigate("/youtube-editor")} />'
+if rail_button not in content:
+    rail_pattern = re.compile(r'(<div className="rail-actions">.*?)(</div><div className="rail-bottom">)', re.DOTALL)
+    content, count = rail_pattern.subn(rf'\1{rail_button}\2', content, count=1)
+    if count != 1:
+        raise SystemExit("Heather YouTube integration failed: left rail container not found")
+
 content = replace_once(
     content,
     'memoryArchive: ["추억 저장소", "사진과 일기로 나의 역사를 기록하는 공간입니다."], projects:',
