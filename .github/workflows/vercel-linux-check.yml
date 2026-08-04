@@ -1,9 +1,6 @@
 name: Vercel-compatible Linux build
 
 on:
-  push:
-    branches:
-      - feat/connect-heather-basic-ollama
   pull_request:
     paths:
       - "apps/web/**"
@@ -15,7 +12,7 @@ on:
       - ".github/workflows/vercel-linux-check.yml"
 
 concurrency:
-  group: vercel-linux-${{ github.ref }}
+  group: vercel-linux-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
