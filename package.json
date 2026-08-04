@@ -9,10 +9,15 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @heather/web",
-    "prebuild": "python3 scripts/build-owner-security-patch.py && python3 scripts/harden-account-session-state.py && python3 scripts/harden-document-memory.py && python3 scripts/fix-direct-command-access-readiness.py",
+    "prebuild": "python3 scripts/build-owner-security-patch.py && python3 scripts/harden-account-session-state.py && python3 scripts/harden-document-memory.py && python3 scripts/fix-direct-command-access-readiness.py && python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py",
     "build": "npm run build -w @heather/web",
     "lint": "npm run lint -w @heather/web",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "prepare:embedded-ollama": "python3 scripts/prepare-embedded-ollama.py",
+    "dev:tauri-web": "python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py && npm run prepare:embedded-ollama && npm run dev",
+    "build:tauri-web": "python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py && npm run prepare:embedded-ollama && NEXT_PUBLIC_TAURI_BUILD=true npm run build -w @heather/web && rm -rf apps/web/out-tauri && mv apps/web/out apps/web/out-tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "engines": {
     "node": ">=20"
@@ -24,6 +29,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4",
     "@types/node": "^20.14.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
