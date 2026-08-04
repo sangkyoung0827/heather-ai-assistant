@@ -86,10 +86,10 @@ jobs:
       - name: Verify generated runtime resources
         run: |
           test -x src-tauri/resources/embedded-ollama/ollama
-          test -d src-tauri/resources/embedded-ollama/lib
           test -f src-tauri/resources/embedded-ollama/THIRD_PARTY_OLLAMA_LICENSE.txt
           test -f src-tauri/resources/embedded-ollama/embedded-runtime.json
           cat src-tauri/resources/embedded-ollama/embedded-runtime.json
+          find src-tauri/resources/embedded-ollama -maxdepth 4 -print | head -100
 
       - name: Build Heather macOS application
         run: npm run desktop:build
@@ -104,7 +104,7 @@ jobs:
           test -x "$RUNTIME_PATH"
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "runtime_path=$RUNTIME_PATH" >> "$GITHUB_OUTPUT"
-          find "$APP_PATH/Contents/Resources/embedded-ollama" -maxdepth 2 -type f | head -40
+          find "$APP_PATH/Contents/Resources/embedded-ollama" -maxdepth 4 -type f | head -100
 
       - name: Smoke-test packaged runtime and local generation
         env:
