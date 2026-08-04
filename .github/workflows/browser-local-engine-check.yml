@@ -38,4 +38,4 @@ jobs:
         run: npm run test:intent -w @heather/web
 
       - name: Build production web application
-        run: npm run build
+        run: npm run build -w @heather/web
