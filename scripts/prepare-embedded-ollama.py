@@ -6,7 +6,6 @@ import os
 import platform
 import shutil
 import stat
-import sys
 import tempfile
 import urllib.request
 import zipfile
@@ -80,12 +79,22 @@ def verify_archive(archive: Path) -> None:
         raise SystemExit(f"Ollama archive checksum mismatch: expected {expected}, received {actual}")
 
 
+def safe_resource_path(filename: str) -> Path | None:
+    if not filename.startswith(RESOURCE_PREFIX):
+        return None
+    relative = Path(filename.removeprefix(RESOURCE_PREFIX))
+    if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+        return None
+    return relative
+
+
 def extract_runtime(archive: Path) -> None:
+    archive_digest = sha256(archive)
     manifest_path = DESTINATION / "embedded-runtime.json"
     if manifest_path.is_file() and (DESTINATION / "ollama").is_file():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if manifest.get("version") == OLLAMA_VERSION and manifest.get("archive_sha256") == sha256(archive):
+            if manifest.get("version") == OLLAMA_VERSION and manifest.get("archive_sha256") == archive_digest:
                 print("Heather embedded Ollama runtime is already prepared.")
                 return
         except (OSError, ValueError):
@@ -94,17 +103,16 @@ def extract_runtime(archive: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="heather-ollama-") as temporary:
         staging = Path(temporary) / "embedded-ollama"
         staging.mkdir(parents=True, exist_ok=True)
+        extracted_files: list[str] = []
+
+        # Keep the complete official Resources subtree instead of assuming a
+        # version-specific runner layout such as Resources/lib. Ollama release
+        # packaging may move runner assets while the root CLI remains stable.
         with zipfile.ZipFile(archive) as bundle:
-            members = [
-                member
-                for member in bundle.infolist()
-                if member.filename == f"{RESOURCE_PREFIX}ollama"
-                or member.filename.startswith(f"{RESOURCE_PREFIX}lib/")
-            ]
-            if not any(member.filename == f"{RESOURCE_PREFIX}ollama" for member in members):
-                raise SystemExit("The Ollama archive does not contain the expected runtime executable.")
-            for member in members:
-                relative = member.filename.removeprefix(RESOURCE_PREFIX)
+            for member in bundle.infolist():
+                relative = safe_resource_path(member.filename)
+                if relative is None:
+                    continue
                 target = staging / relative
                 if member.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
@@ -112,8 +120,15 @@ def extract_runtime(archive: Path) -> None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with bundle.open(member) as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output)
+                extracted_files.append(relative.as_posix())
 
         executable = staging / "ollama"
+        if not executable.is_file():
+            preview = ", ".join(extracted_files[:40]) or "no resource files"
+            raise SystemExit(
+                "The Ollama archive does not contain the expected Resources/ollama runtime. "
+                f"Extracted entries: {preview}"
+            )
         executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         (staging / "THIRD_PARTY_OLLAMA_LICENSE.txt").write_text(OLLAMA_LICENSE, encoding="utf-8")
         (staging / "embedded-runtime.json").write_text(
@@ -122,7 +137,8 @@ def extract_runtime(archive: Path) -> None:
                     "runtime": "ollama",
                     "version": OLLAMA_VERSION,
                     "archive": DARWIN_ARCHIVE_URL,
-                    "archive_sha256": sha256(archive),
+                    "archive_sha256": archive_digest,
+                    "resource_file_count": len(extracted_files),
                     "managed_by": "Heather AI Assistant",
                 },
                 indent=2,
@@ -132,6 +148,9 @@ def extract_runtime(archive: Path) -> None:
         )
         shutil.rmtree(DESTINATION, ignore_errors=True)
         shutil.copytree(staging, DESTINATION)
+        print(f"Extracted {len(extracted_files)} official Ollama resource files.")
+        for item in extracted_files[:40]:
+            print(f"  - {item}")
 
 
 def main() -> None:
