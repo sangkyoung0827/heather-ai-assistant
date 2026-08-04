@@ -18,3 +18,5 @@ pnpm-debug.log*
 .vercel
 src-tauri/target
 src-tauri/gen
+src-tauri/resources/embedded-ollama/*
+!src-tauri/resources/embedded-ollama/README.md
