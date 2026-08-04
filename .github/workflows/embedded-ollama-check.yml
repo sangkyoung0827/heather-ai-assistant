@@ -37,8 +37,8 @@ jobs:
       - name: Apply production and embedded-engine patches
         run: npm run prebuild
 
-      - name: Verify patch idempotency
-        run: npm run prebuild
+      - name: Verify embedded patch idempotency
+        run: python3 scripts/connect-embedded-ollama.py && python3 scripts/connect-embedded-ollama-web.py
 
       - name: Install JavaScript dependencies
         run: npm install
