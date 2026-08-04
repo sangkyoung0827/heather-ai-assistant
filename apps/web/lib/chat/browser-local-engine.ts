@@ -2,7 +2,6 @@
 
 import {
   CreateWebWorkerMLCEngine,
-  prebuiltAppConfig,
   type MLCEngineInterface
 } from "@mlc-ai/web-llm";
 import type {
@@ -13,9 +12,14 @@ import type {
 } from "@heather/core";
 import { generateConversationTitle } from "@heather/core";
 import { getSupabaseBrowserClient } from "../supabase-client";
+import {
+  HEATHER_STANDARD_MODEL_ID,
+  LOW_MEMORY_MODEL_ID,
+  UPSTREAM_STANDARD_MODEL_ID,
+  hasHeatherModelStore,
+  resolveHeatherModelAppConfig
+} from "./heather-web-model-config";
 
-const DEFAULT_MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
-const LOW_MEMORY_MODEL = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
 const PREFLIGHT_PROVIDER = "browser-local-preflight";
 
 export type BrowserEngineProgress = {
@@ -173,22 +177,37 @@ async function ensureEngine(onProgress?: (progress: BrowserEngineProgress) => vo
   latestProgressHandler = onProgress || null;
   if (enginePromise) return enginePromise;
 
-  const preferred = configuredModel();
-  enginePromise = createEngine(preferred).catch(async (error) => {
-    if (preferred === LOW_MEMORY_MODEL) throw error;
-    engineWorker?.terminate();
-    engineWorker = null;
+  enginePromise = loadFirstAvailableModel(configuredModels()).catch((error) => {
     enginePromise = null;
-    latestProgressHandler?.({ progress: 0, text: "기본 모델을 시작하지 못해 경량 모델로 전환합니다." });
-    return createEngine(LOW_MEMORY_MODEL);
+    throw error;
   });
   return enginePromise;
 }
 
+async function loadFirstAvailableModel(models: string[], index = 0): Promise<MLCEngineInterface> {
+  const model = models[index];
+  if (!model) throw new Error("실행 가능한 Heather 브라우저 모델을 찾지 못했습니다.");
+
+  try {
+    return await createEngine(model);
+  } catch (error) {
+    resetWorker();
+    const fallback = models[index + 1];
+    if (!fallback) throw error;
+    latestProgressHandler?.({
+      progress: 0,
+      text: fallback === UPSTREAM_STANDARD_MODEL_ID
+        ? "Heather 전용 모델 저장소에 연결하지 못해 표준 원본 모델로 전환합니다."
+        : "표준 모델을 시작하지 못해 경량 모델로 전환합니다."
+    });
+    return loadFirstAvailableModel(models, index + 1);
+  }
+}
+
 async function createEngine(model: string): Promise<MLCEngineInterface> {
   activeModel = model;
+  const appConfig = await resolveHeatherModelAppConfig(model);
   engineWorker = new Worker(new URL("./browser-local-engine.worker.ts", import.meta.url), { type: "module" });
-  const appConfig = { ...prebuiltAppConfig, cacheBackend: "indexeddb" as const };
   return CreateWebWorkerMLCEngine(engineWorker, model, {
     appConfig,
     initProgressCallback: (report: { progress?: number; text?: string }) => {
@@ -200,11 +219,30 @@ async function createEngine(model: string): Promise<MLCEngineInterface> {
   });
 }
 
-function configuredModel(): string {
+function configuredModels(): string[] {
   const configured = process.env.NEXT_PUBLIC_HEATHER_WEB_MODEL?.trim();
-  if (configured) return configured;
+  if (configured) return uniqueModels([configured, LOW_MEMORY_MODEL_ID]);
+
   const memory = (navigator as NavigatorWithDeviceMemory).deviceMemory;
-  return typeof memory === "number" && memory <= 4 ? LOW_MEMORY_MODEL : DEFAULT_MODEL;
+  if (typeof memory === "number" && memory <= 4) {
+    return [LOW_MEMORY_MODEL_ID];
+  }
+
+  if (hasHeatherModelStore()) {
+    return [HEATHER_STANDARD_MODEL_ID, UPSTREAM_STANDARD_MODEL_ID, LOW_MEMORY_MODEL_ID];
+  }
+
+  return [UPSTREAM_STANDARD_MODEL_ID, LOW_MEMORY_MODEL_ID];
+}
+
+function uniqueModels(models: string[]): string[] {
+  return [...new Set(models.filter(Boolean))];
+}
+
+function resetWorker(): void {
+  engineWorker?.terminate();
+  engineWorker = null;
+  activeModel = "";
 }
 
 async function runPersonalPreflight(payload: ChatRequestPayload, signal?: AbortSignal): Promise<BrowserPreflightResponse> {
