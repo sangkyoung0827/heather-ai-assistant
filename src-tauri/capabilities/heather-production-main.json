@@ -1,0 +1,34 @@
+{
+  "$schema": "../gen/schemas/remote-schema.json",
+  "identifier": "heather-production-main",
+  "description": "Allows the exact Heather production origin in the main desktop window to use Heather's explicitly registered local capabilities.",
+  "windows": ["main"],
+  "local": true,
+  "remote": {
+    "urls": ["https://heather-ai-assistant.vercel.app/*"]
+  },
+  "platforms": ["macOS"],
+  "permissions": [
+    "core:default",
+    "allow-get-system-info",
+    "allow-choose-directory",
+    "allow-list-directory",
+    "allow-search-files",
+    "allow-read-text-file",
+    "allow-open-external-url",
+    "allow-open-url",
+    "allow-open-app",
+    "allow-search-web",
+    "allow-search-youtube",
+    "allow-search-youtube-music",
+    "allow-play-youtube-music",
+    "allow-speak-macos",
+    "allow-stop-speaking",
+    "allow-get-clipboard-text",
+    "allow-set-clipboard-text",
+    "allow-ollama-status",
+    "allow-ollama-chat",
+    "allow-ollama-shutdown",
+    "allow-show-heather"
+  ]
+}
