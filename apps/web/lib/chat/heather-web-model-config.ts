@@ -6,6 +6,7 @@ export const HEATHER_STANDARD_MODEL_ID = "Heather-Qwen2.5-3B-Instruct-q4f16_1-v1
 export const UPSTREAM_STANDARD_MODEL_ID = "Qwen2.5-3B-Instruct-q4f16_1-MLC";
 export const LOW_MEMORY_MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 
+const DEFAULT_HEATHER_MODEL_BASE_URL = "https://pub-bf31b59c04aa4617a9ff7347507329ea.r2.dev";
 const STANDARD_MANIFEST_PATH = "manifests/heather-standard-v1.json";
 
 type HeatherModelIntegrity = {
@@ -73,8 +74,7 @@ export async function resolveHeatherModelAppConfig(modelId: string) {
 
 function modelStoreBaseUrl(): string | null {
   const configured = process.env.NEXT_PUBLIC_HEATHER_MODEL_BASE_URL?.trim();
-  if (!configured) return null;
-  return ensureTrailingSlash(configured);
+  return ensureTrailingSlash(configured || DEFAULT_HEATHER_MODEL_BASE_URL);
 }
 
 function resolveAssetUrl(baseUrl: string, path: string): string {
