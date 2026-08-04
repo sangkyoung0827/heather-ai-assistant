@@ -1,0 +1,224 @@
+name: Deploy Heather standard model to R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Hugging Face revision for the MLC model artifacts
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-heather-standard-model-r2
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      MODEL_REPOSITORY: mlc-ai/Qwen2.5-3B-Instruct-q4f16_1-MLC
+      MODEL_ID: Heather-Qwen2.5-3B-Instruct-q4f16_1-v1.0.0
+      MODEL_VERSION: v1.0.0
+      MODEL_PATH: models/qwen2.5-3b-instruct-q4f16_1/v1.0.0
+      MODEL_LIB_PATH: libs/webllm-v0_2_84/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm
+      MANIFEST_PATH: manifests/heather-standard-v1.json
+      MODEL_LIB_URL: https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_84/base/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm
+      MODEL_DIR: .model-dist/model
+      MODEL_LIB_FILE: .model-dist/model-lib/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm
+      MANIFEST_FILE: .model-dist/manifests/heather-standard-v1.json
+      SOURCE_REVISION: ${{ inputs.source_revision }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+      HEATHER_PUBLIC_ORIGIN: ${{ secrets.HEATHER_PUBLIC_ORIGIN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_EC2_METADATA_DISABLED: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            CLOUDFLARE_ACCOUNT_ID
+            R2_ACCESS_KEY_ID
+            R2_SECRET_ACCESS_KEY
+            R2_BUCKET_NAME
+            R2_PUBLIC_BASE_URL
+            HEATHER_PUBLIC_ORIGIN
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required repository secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install deployment tools
+        run: python -m pip install --disable-pip-version-check huggingface_hub awscli
+
+      - name: Download versioned MLC model artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${MODEL_DIR}" "$(dirname "${MODEL_LIB_FILE}")" "$(dirname "${MANIFEST_FILE}")"
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+
+          snapshot_download(
+              repo_id=os.environ["MODEL_REPOSITORY"],
+              revision=os.environ["SOURCE_REVISION"],
+              local_dir=os.environ["MODEL_DIR"],
+          )
+          PY
+          rm -rf "${MODEL_DIR}/.cache" "${MODEL_DIR}/.git"
+
+      - name: Download compatible WebGPU model library
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 --retry-delay 2 \
+            "${MODEL_LIB_URL}" \
+            --output "${MODEL_LIB_FILE}"
+
+      - name: Add Qwen license and redistribution notice
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 --retry-delay 2 \
+            "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct/resolve/main/LICENSE" \
+            --output "${MODEL_DIR}/LICENSE-QWEN.txt"
+          cat > "${MODEL_DIR}/NOTICE" <<'NOTICE'
+          Qwen is licensed under the Qwen RESEARCH LICENSE AGREEMENT,
+          Copyright (c) Alibaba Cloud. All Rights Reserved.
+
+          This Heather distribution contains an MLC/WebLLM quantized form of
+          Qwen2.5-3B-Instruct. Commercial use requires separate permission from
+          the model licensor.
+          NOTICE
+
+      - name: Build integrity manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build-heather-model-manifest.py \
+            --model-dir "${MODEL_DIR}" \
+            --model-lib "${MODEL_LIB_FILE}" \
+            --output "${MANIFEST_FILE}" \
+            --model-id "${MODEL_ID}" \
+            --version "${MODEL_VERSION}" \
+            --model-path "${MODEL_PATH}" \
+            --model-lib-path "${MODEL_LIB_PATH}" \
+            --source-repository "${MODEL_REPOSITORY}" \
+            --source-revision "${SOURCE_REVISION}" \
+            --license-id "qwen-research" \
+            --vram-required-mb "2504.76" \
+            --context-window-size "4096"
+
+      - name: Build R2 CORS policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          policy = {
+              "CORSRules": [
+                  {
+                      "AllowedOrigins": [
+                          os.environ["HEATHER_PUBLIC_ORIGIN"].rstrip("/"),
+                          "http://localhost:3000",
+                      ],
+                      "AllowedMethods": ["GET", "HEAD"],
+                      "AllowedHeaders": ["*"],
+                      "ExposeHeaders": [
+                          "ETag",
+                          "Content-Length",
+                          "Content-Range",
+                          "Accept-Ranges",
+                          "CF-Cache-Status",
+                      ],
+                      "MaxAgeSeconds": 3600,
+                  }
+              ]
+          }
+          Path(".model-dist/r2-cors.json").write_text(
+              json.dumps(policy, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload immutable model artifacts to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws --endpoint-url "${endpoint}" s3 sync \
+            "${MODEL_DIR}/" \
+            "s3://${R2_BUCKET_NAME}/${MODEL_PATH}/" \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable"
+          aws --endpoint-url "${endpoint}" s3 cp \
+            "${MODEL_LIB_FILE}" \
+            "s3://${R2_BUCKET_NAME}/${MODEL_LIB_PATH}" \
+            --content-type "application/wasm" \
+            --cache-control "public,max-age=31536000,immutable"
+          aws --endpoint-url "${endpoint}" s3 cp \
+            "${MANIFEST_FILE}" \
+            "s3://${R2_BUCKET_NAME}/${MANIFEST_PATH}" \
+            --content-type "application/json" \
+            --cache-control "public,max-age=60,must-revalidate"
+
+      - name: Apply browser CORS policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws --endpoint-url "${endpoint}" s3api put-bucket-cors \
+            --bucket "${R2_BUCKET_NAME}" \
+            --cors-configuration file://.model-dist/r2-cors.json
+
+      - name: Verify public model endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_base="${R2_PUBLIC_BASE_URL%/}"
+          curl --fail --location --retry 8 --retry-delay 5 \
+            "${public_base}/${MANIFEST_PATH}" \
+            --output .model-dist/remote-manifest.json
+          curl --fail --head --retry 8 --retry-delay 5 \
+            "${public_base}/${MODEL_PATH}/mlc-chat-config.json"
+          curl --fail --head --retry 8 --retry-delay 5 \
+            "${public_base}/${MODEL_LIB_PATH}"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(Path(".model-dist/remote-manifest.json").read_text(encoding="utf-8"))
+          if manifest.get("modelId") != os.environ["MODEL_ID"]:
+              raise SystemExit("Remote manifest modelId does not match the Heather standard model")
+          if manifest.get("version") != os.environ["MODEL_VERSION"]:
+              raise SystemExit("Remote manifest version does not match the deployed version")
+          print("Heather standard model is publicly reachable from R2.")
+          PY
