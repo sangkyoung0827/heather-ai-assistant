@@ -7,6 +7,7 @@ import type {
   ChatType
 } from "@heather/core";
 import { invokeTauriCommand, isTauriRuntime } from "@heather/platform";
+import { getSupabaseBrowserClient } from "../supabase-client";
 
 export type EmbeddedOllamaStatus = {
   available: boolean;
@@ -25,6 +26,14 @@ export type EmbeddedOllamaChatResponse = ChatResponsePayload & {
   provider: "embedded-ollama";
   model: string;
   execution: ChatExecutionMetadata;
+};
+
+export type PersistedEmbeddedResearchTurn = {
+  conversationId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  title: string;
+  duplicate: boolean;
 };
 
 export function canUseEmbeddedOllama(): boolean {
@@ -67,6 +76,29 @@ export async function runEmbeddedOllamaChat(
     provider: "embedded-ollama",
     execution
   };
+}
+
+export async function persistEmbeddedResearchTurn(
+  payload: ChatRequestPayload,
+  response: EmbeddedOllamaChatResponse,
+  signal?: AbortSignal
+): Promise<PersistedEmbeddedResearchTurn> {
+  const session = await getSupabaseBrowserClient()?.auth.getSession();
+  const token = session?.data.session?.access_token;
+  if (!token) throw new Error("연구원 기본 엔진 대화를 저장하려면 로그인이 필요합니다.");
+  const result = await fetch("/api/research/local-turn", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ payload, response }),
+    cache: "no-store",
+    signal
+  });
+  const data = await result.json() as PersistedEmbeddedResearchTurn & { error?: string };
+  if (!result.ok || data.error) throw new Error(data.error || "로컬 연구 대화를 저장하지 못했습니다.");
+  return data;
 }
 
 function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
