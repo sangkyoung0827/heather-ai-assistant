@@ -5,6 +5,9 @@ import { DirectCommandRepository } from "../lib/intent/direct-command-repository
 import { RepeatedQueryLearningService } from "../lib/intent/repeated-query-learning";
 
 const command = { id: "one", canonicalTrigger: "이번 주 프로젝트 진행 상태를 알려줘", triggers: ["프로젝트 진행 상황 알려줘"], response: "고정 응답", enabled: true };
+const TEST_OWNER_PROMOTION = "11111111-1111-4111-8111-111111111111";
+const TEST_OWNER_LEARNING = "22222222-2222-4222-8222-222222222222";
+const TEST_OWNER_NEGATIVE = "33333333-3333-4333-8333-333333333333";
 
 test("exact, normalized, trigger, and conservative similarity matching", () => {
   assert.equal(findIntentCommandMatch("이번 주 프로젝트 진행 상태를 알려줘", [command])?.kind, "exact");
@@ -23,7 +26,7 @@ test("disabled commands and unsafe or volatile prompts do not promote", () => {
 });
 
 test("three successful repeated safe prompts promote one server command", async () => {
-  const repository = new DirectCommandRepository();
+  const repository = new DirectCommandRepository(TEST_OWNER_PROMOTION);
   const message = `반복 테스트 안내 ${Date.now()}`;
   const response = "반복해서 사용할 수 있는 고정 안내 응답입니다.";
   assert.equal((await repository.recordFallback(message, response, true)).promoted, false);
@@ -34,7 +37,7 @@ test("three successful repeated safe prompts promote one server command", async 
 });
 
 test("repeated-query learning promotes only a stable, safe fallback response", async () => {
-  const repository = new DirectCommandRepository();
+  const repository = new DirectCommandRepository(TEST_OWNER_LEARNING);
   const learning = new RepeatedQueryLearningService(repository);
   const message = `고정 기능 안내를 설명해줘 ${Date.now()}`;
   const response = "이 기능은 반복 작업에 사용할 수 있는 고정 안내를 제공합니다.";
@@ -47,7 +50,7 @@ test("repeated-query learning promotes only a stable, safe fallback response", a
 });
 
 test("dynamic and inconsistent responses never auto-promote", async () => {
-  const repository = new DirectCommandRepository();
+  const repository = new DirectCommandRepository(TEST_OWNER_NEGATIVE);
   const learning = new RepeatedQueryLearningService(repository);
   await Promise.all(["one", "two", "three"].map((messageId) => learning.recordSuccessfulFallback({ message: "오늘 날씨 알려줘", response: "맑습니다.", messageId })));
   assert.equal((await repository.find("오늘 날씨 알려줘")), null);
