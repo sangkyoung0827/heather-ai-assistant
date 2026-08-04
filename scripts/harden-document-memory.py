@@ -17,11 +17,6 @@ def replace_once(old: str, new: str) -> None:
     content = content.replace(old, new, 1)
 
 
-replace_once(
-    'import type { SupabaseClient, User } from "@supabase/supabase-js";',
-    'import type { User } from "@supabase/supabase-js";'
-)
-
 # Every parent document query is explicitly scoped to the authenticated user,
 # even though Supabase RLS is also required. This prevents service-role or future
 # policy changes from mixing documents between accounts.
