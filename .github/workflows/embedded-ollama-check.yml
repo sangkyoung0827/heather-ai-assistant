@@ -1,0 +1,56 @@
+name: Embedded Ollama integration check
+
+on:
+  push:
+    branches:
+      - feat/connect-heather-basic-ollama
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - "apps/web/**"
+      - "packages/**"
+      - "scripts/connect-embedded-ollama.py"
+      - "scripts/connect-embedded-ollama-web.py"
+      - "scripts/prepare-embedded-ollama.py"
+      - "package.json"
+      - ".github/workflows/embedded-ollama-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply production and embedded-engine patches
+        run: npm run prebuild
+
+      - name: Verify patch idempotency
+        run: npm run prebuild
+
+      - name: Install JavaScript dependencies
+        run: npm install
+
+      - name: Type-check workspaces
+        run: npm run typecheck
+
+      - name: Run intent tests
+        run: npm run test:intent -w @heather/web
+
+      - name: Check Tauri Rust bridge
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Validate embedded runtime preparation script
+        run: python3 -m py_compile scripts/prepare-embedded-ollama.py scripts/connect-embedded-ollama.py scripts/connect-embedded-ollama-web.py
