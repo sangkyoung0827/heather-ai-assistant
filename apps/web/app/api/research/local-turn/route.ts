@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     const body = await request.json() as { payload?: ChatRequestPayload; response?: BrowserLocalResponse };
     const payload = body.payload;
     const response = body.response;
+    const execution = response?.execution;
     const clientMessageId = payload?.clientMessageId || payload?.messageId;
 
     if (!payload?.message?.trim() || !clientMessageId || !response?.message?.trim()) {
@@ -26,9 +27,13 @@ export async function POST(request: Request) {
     }
     if (
       payload.executionMode !== "HEATHER_BASIC"
-      || response.execution?.actualExecutionMode !== "HEATHER_BASIC"
-      || response.execution.externalLlmUsed
+      || !execution
+      || execution.requestedExecutionMode !== "HEATHER_BASIC"
+      || execution.actualExecutionMode !== "HEATHER_BASIC"
+      || execution.chatType !== "research"
+      || execution.externalLlmUsed
       || !response.provider?.trim()
+      || !response.model?.trim()
     ) {
       return NextResponse.json({ error: "Only verified Heather Basic browser turns can use this endpoint." }, { status: 400 });
     }
@@ -74,9 +79,9 @@ export async function POST(request: Request) {
         model: response.model,
         requested_execution_mode: "HEATHER_BASIC",
         actual_execution_mode: "HEATHER_BASIC",
-        local_engine_used: Boolean(response.execution.localEngineUsed),
+        local_engine_used: Boolean(execution.localEngineUsed),
         external_llm_used: false,
-        duration_ms: response.execution.durationMs
+        duration_ms: execution.durationMs
       }
     });
 
