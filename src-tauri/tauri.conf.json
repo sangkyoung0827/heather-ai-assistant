@@ -6,8 +6,8 @@
   "build": {
     "beforeDevCommand": "npm run dev:tauri-web",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "npm run build:tauri-web",
-    "frontendDist": "../apps/web/out-tauri"
+    "beforeBuildCommand": "npm run prepare:tauri-build",
+    "frontendDist": "https://heather-ai-assistant.vercel.app"
   },
   "app": {
     "withGlobalTauri": true,
@@ -23,7 +23,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        "heather-production-main",
+        "heather-production-floating"
+      ]
     }
   },
   "bundle": {
