@@ -1,6 +1,11 @@
 name: Heather macOS desktop release
 
 on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "services/youtube-auto-editor/**"
+      - ".github/workflows/macos-desktop-release.yml"
   push:
     branches: [main]
     paths:
@@ -39,6 +44,7 @@ jobs:
           if-no-files-found: error
 
   release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     steps:
