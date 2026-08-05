@@ -23,6 +23,7 @@ jobs:
     timeout-minutes: 75
     env:
       DESKTOP_STAGE: /tmp/heather-desktop-build
+      CSC_FOR_PULL_REQUEST: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
