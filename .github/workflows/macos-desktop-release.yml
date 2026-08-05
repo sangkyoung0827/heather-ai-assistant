@@ -1,0 +1,58 @@
+name: Heather macOS desktop release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - "services/youtube-auto-editor/**"
+      - ".github/workflows/macos-desktop-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install desktop dependencies
+        run: npm install --prefix apps/desktop --no-audit --no-fund
+      - name: Validate desktop sources
+        run: npm run check --prefix apps/desktop
+      - name: Verify worker package
+        run: python3 services/youtube-auto-editor/install.py --verify-only
+      - name: Build macOS x64 and arm64 packages
+        run: npm run dist --prefix apps/desktop -- --x64 --arm64
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Heather-macOS-${{ github.run_number }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Heather-macOS-${{ github.run_number }}
+          path: release
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: desktop-v0.5.0-${{ github.run_number }}
+        run: |
+          gh release create "$TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Heather Desktop 0.5.0" \
+            --notes "macOS desktop build with managed local video worker. This build is not notarized because no Apple Developer ID certificate is configured." \
+            --latest
