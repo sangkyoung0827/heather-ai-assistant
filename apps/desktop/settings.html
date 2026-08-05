@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Heather 로컬 설정</title>
+  <style>
+    :root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;background:#090b12;color:#f3f5ff}*{box-sizing:border-box}body{margin:0;padding:26px;background:radial-gradient(circle at 20% 0,rgba(123,92,255,.18),transparent 32%),#090b12}.wrap{max-width:760px;margin:auto;display:grid;gap:16px}h1{margin:0;font-size:24px}p{margin:6px 0 0;color:#9aa4bd;line-height:1.55}.card{padding:18px;border:1px solid rgba(255,255,255,.1);border-radius:18px;background:linear-gradient(145deg,rgba(22,26,40,.97),rgba(10,12,19,.97));box-shadow:0 18px 48px rgba(0,0,0,.22)}.card h2{margin:0 0 12px;font-size:15px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.status{padding:12px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:#0a0d15}.status b{display:block;font-size:12px}.status span{display:block;margin-top:6px;color:#9ea8bf;font-size:11px;word-break:break-all}.ok{color:#86efac!important}.bad{color:#fca5a5!important}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}input{flex:1;min-width:260px;padding:12px 13px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:#080b12;color:#fff;font:inherit}button{display:inline-flex;align-items:center;justify-content:center;padding:11px 14px;border:1px solid rgba(167,139,250,.35);border-radius:12px;background:rgba(124,58,237,.2);color:#f3efff;font:inherit;font-weight:800;cursor:pointer}button.primary{border:0;background:linear-gradient(135deg,#8b5cf6,#c4b5fd);color:#090b12}button:disabled{opacity:.45;cursor:not-allowed}.note{font-size:11px;color:#8f99b0}.console{height:160px;overflow:auto;margin-top:10px;padding:12px;border-radius:12px;background:#05070c;color:#b9c2d8;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.warning{border-color:rgba(251,191,36,.3);background:rgba(120,53,15,.12)}@media(max-width:650px){.grid{grid-template-columns:1fr}body{padding:16px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header><h1>Heather 로컬 연결</h1><p>이 설정은 Mac 안에서만 관리됩니다. YouTube 편집 페이지에는 업로드·검토·게시 세 단계만 표시됩니다.</p></header>
+    <section class="card"><h2>실행 환경</h2><div id="statuses" class="grid"></div><div class="row" style="margin-top:12px"><button id="install" class="primary">로컬 구성 요소 설치·복구</button><button id="restart">영상 워커 다시 시작</button><button id="logs">로그 열기</button></div></section>
+    <section class="card"><h2>NVIDIA NIM</h2><div class="row"><input id="nvidia" type="password" autocomplete="off" placeholder="새 nvapi- 키 입력"/><button id="saveKey">Keychain에 저장</button><button id="testNvidia">MiniMax·Nemotron 확인</button></div><p class="note">키는 Electron safeStorage를 통해 macOS Keychain으로 암호화되며 GitHub·Vercel·설정 파일에 저장되지 않습니다.</p></section>
+    <section class="card"><h2>YouTube OAuth</h2><div class="row"><button id="oauth">데스크톱 OAuth JSON 가져오기</button><button id="testYoutube">Google 로그인·채널 연결 확인</button></div><p class="note">첫 채널 확인 때 시스템 기본 브라우저에서 Google 동의 화면이 열리고 refresh token이 Mac에만 저장됩니다.</p></section>
+    <section class="card warning"><h2>사용하지 않는 자격증명</h2><p>FFmpeg는 로컬 명령줄 도구이므로 Basic Authorization이 필요하지 않습니다. YouTube 업로드도 API 키가 아니라 OAuth를 사용합니다. 대화에 노출된 기존 키는 폐기하고 새 키를 사용하세요.</p></section>
+    <section class="card"><h2>설치·검사 로그</h2><div id="console" class="console">준비됨.</div></section>
+  </main>
+<script>
+  const api = window.heatherDesktop;
+  const statuses = document.getElementById('statuses');
+  const consoleBox = document.getElementById('console');
+  const buttons = [...document.querySelectorAll('button')];
+  const line = (text) => { consoleBox.textContent += `\n${text}`; consoleBox.scrollTop = consoleBox.scrollHeight; };
+  const busy = (value) => buttons.forEach(button => button.disabled = value);
+  api.onProgress(line);
+  function item(label, ok, value){return `<div class="status"><b>${label}</b><span class="${ok?'ok':'bad'}">${ok?'정상':'필요'} · ${value||'-'}</span></div>`}
+  async function refresh(){
+    const s=await api.status();
+    statuses.innerHTML=[item('Python 3',!!s.python,s.python),item('FFmpeg',!!s.ffmpeg,s.ffmpeg),item('로컬 영상 워커',s.workerRunning,s.workerRunning?'실행 중':s.workerInstalled?'설치됨':'미설치'),item('NVIDIA 키',s.nvidiaConfigured,s.nvidiaConfigured?'Keychain 저장됨':'새 키 필요'),item('Google OAuth JSON',s.oauthConfigured,s.oauthProject||'가져오기 필요'),item('YouTube 승인',s.youtubeAuthorized,s.youtubeAuthorized?'토큰 저장됨':'로그인 필요')].join('');
+  }
+  async function action(fn){busy(true);try{const result=await fn();if(result?.output)line(result.output);line('완료.');}catch(error){line(`오류: ${error.message}`);}finally{busy(false);await refresh();}}
+  document.getElementById('install').onclick=()=>action(()=>api.installRuntime());
+  document.getElementById('restart').onclick=()=>action(()=>api.restartWorker());
+  document.getElementById('logs').onclick=()=>api.openLogs();
+  document.getElementById('saveKey').onclick=()=>action(async()=>{const value=document.getElementById('nvidia').value;const result=await api.saveNvidiaKey(value);document.getElementById('nvidia').value='';return result;});
+  document.getElementById('testNvidia').onclick=()=>action(()=>api.runNvidiaCheck());
+  document.getElementById('oauth').onclick=()=>action(()=>api.importOauth());
+  document.getElementById('testYoutube').onclick=()=>action(()=>api.runYoutubeCheck());
+  refresh().catch(error=>line(error.message));
+</script>
+</body>
+</html>
