@@ -1,16 +1,16 @@
 {
   "name": "heather-desktop",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
-  "description": "Heather macOS desktop shell with a managed local video worker.",
-  "main": "main.cjs",
+  "description": "Heather macOS desktop application with a managed local video worker.",
+  "main": "bootstrap.cjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.cjs && node --check preload.cjs",
+    "check": "node --check bootstrap.cjs && node --check main.cjs && node --check preload.cjs",
     "dist": "electron-builder --mac dmg zip --publish never"
   },
   "devDependencies": {
-    "electron": "^37.2.6",
+    "electron": "^37.10.3",
     "electron-builder": "^26.0.12"
   },
   "build": {
@@ -18,6 +18,7 @@
     "productName": "Heather",
     "asar": true,
     "files": [
+      "bootstrap.cjs",
       "main.cjs",
       "preload.cjs",
       "settings.html",
@@ -38,14 +39,43 @@
         "dmg",
         "zip"
       ],
-      "identity": null,
+      "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "artifactName": "Heather-${version}-${arch}.${ext}"
+      "minimumSystemVersion": "10.15.0",
+      "artifactName": "Heather-${version}-${arch}.${ext}",
+      "extendInfo": {
+        "LSApplicationCategoryType": "public.app-category.productivity",
+        "NSHighResolutionCapable": true
+      }
     },
     "dmg": {
       "title": "Heather ${version}",
-      "sign": false
+      "sign": false,
+      "format": "UDZO",
+      "filesystem": "HFS+",
+      "backgroundColor": "#11131a",
+      "iconSize": 96,
+      "iconTextSize": 13,
+      "window": {
+        "size": {
+          "width": 560,
+          "height": 380
+        }
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 190,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   }
 }
