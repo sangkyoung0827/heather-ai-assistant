@@ -1,0 +1,76 @@
+name: YouTube auto editor check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/app/api/youtube-editor/**"
+      - "apps/web/app/youtube-editor/**"
+      - "apps/web/components/heather/panels/YouTubeAutoEditorPanel.tsx"
+      - "scripts/integrate-youtube-auto-editor.py"
+      - "services/youtube-auto-editor/**"
+      - "package.json"
+      - ".github/workflows/youtube-auto-editor-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/web/app/api/youtube-editor/**"
+      - "apps/web/app/youtube-editor/**"
+      - "apps/web/components/heather/panels/YouTubeAutoEditorPanel.tsx"
+      - "scripts/integrate-youtube-auto-editor.py"
+      - "services/youtube-auto-editor/**"
+      - "package.json"
+      - ".github/workflows/youtube-auto-editor-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: youtube-auto-editor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install web dependencies
+        run: npm install
+
+      - name: Apply production patches and verify packaged worker
+        run: npm run prebuild
+
+      - name: Check integration patch idempotency
+        run: python3 scripts/integrate-youtube-auto-editor.py
+
+      - name: Type-check workspaces
+        run: npm run typecheck
+
+      - name: Build Heather production app
+        run: npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Extract packaged editing worker
+        run: python3 services/youtube-auto-editor/install.py --output /tmp/heather-worker
+
+      - name: Install worker test dependencies
+        working-directory: /tmp/heather-worker/heather-youtube-auto-editor
+        run: python -m pip install -e '.[web,dev]'
+
+      - name: Run worker tests
+        working-directory: /tmp/heather-worker/heather-youtube-auto-editor
+        run: pytest -q
