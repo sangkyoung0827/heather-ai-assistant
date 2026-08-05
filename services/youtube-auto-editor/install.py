@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import shutil
 import zipfile
 from pathlib import Path
 
-EXPECTED_SHA256 = "24de5b95bb6c10813e7ef9475c2f75f8402a7c26ffe55fdca2b741006667547e"
+EXPECTED_SHA256 = "ad0dab495fb757199d0c5d699ab30e4de906c098e0e118718d5f1752bbde3ddf"
 
 
 def safe_extract(archive: zipfile.ZipFile, target: Path) -> None:
@@ -40,6 +41,19 @@ def load_package() -> bytes:
     return package
 
 
+def apply_overlay(installed: Path) -> None:
+    overlay = Path(__file__).resolve().parent / "overlay"
+    if not overlay.exists():
+        return
+    for source in overlay.rglob("*"):
+        if source.is_dir():
+            continue
+        relative = source.relative_to(overlay)
+        destination = installed / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Install the isolated Heather YouTube editing worker")
     parser.add_argument("--output", type=Path, default=Path.cwd(), help="Directory that will contain the worker folder")
@@ -48,7 +62,7 @@ def main() -> None:
 
     package = load_package()
     if args.verify_only:
-        print(f"Heather YouTube worker package verified: {EXPECTED_SHA256}")
+        print(f"Heather YouTube worker base package verified: {EXPECTED_SHA256}")
         return
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -61,7 +75,8 @@ def main() -> None:
         archive_path.unlink(missing_ok=True)
 
     installed = args.output / "heather-youtube-auto-editor"
-    print(f"Installed: {installed}")
+    apply_overlay(installed)
+    print(f"Installed and upgraded: {installed}")
     print("Next:")
     print(f"  cd {installed}")
     print("  python3 -m venv .venv && source .venv/bin/activate")
