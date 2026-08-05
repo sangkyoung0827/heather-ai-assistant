@@ -17,13 +17,12 @@ on:
 permissions:
   contents: write
 
-env:
-  DESKTOP_STAGE: ${{ runner.temp }}/heather-desktop-build
-
 jobs:
   build:
     runs-on: macos-14
     timeout-minutes: 60
+    env:
+      DESKTOP_STAGE: /tmp/heather-desktop-build
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,13 +37,13 @@ jobs:
           cp -R apps/desktop "$DESKTOP_STAGE/apps/desktop"
           cp -R services/youtube-auto-editor "$DESKTOP_STAGE/services/youtube-auto-editor"
       - name: Install desktop dependencies
-        working-directory: ${{ env.DESKTOP_STAGE }}/apps/desktop
+        working-directory: /tmp/heather-desktop-build/apps/desktop
         run: npm install --no-audit --no-fund
       - name: Validate desktop sources
-        working-directory: ${{ env.DESKTOP_STAGE }}/apps/desktop
+        working-directory: /tmp/heather-desktop-build/apps/desktop
         run: npm run check
       - name: Build macOS x64 and arm64 packages
-        working-directory: ${{ env.DESKTOP_STAGE }}/apps/desktop
+        working-directory: /tmp/heather-desktop-build/apps/desktop
         run: npm run dist -- --x64 --arm64
       - name: Collect packages
         run: |
