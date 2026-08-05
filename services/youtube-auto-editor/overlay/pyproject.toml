@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "heather-youtube-auto-editor"
+version = "0.4.0"
+description = "Focused YouTube automation pipeline: auto-cut, subtitles, thumbnail, upload"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Heather Project"}]
+dependencies = [
+  "google-api-python-client>=2.160.0",
+  "google-auth-oauthlib>=1.2.1",
+  "Pillow>=11.0.0",
+  "PyYAML>=6.0.2",
+  "python-dotenv>=1.0.1",
+  "requests>=2.32.0",
+  "rich>=13.9.0",
+  "scenedetect[opencv]>=0.6.5",
+  "typer>=0.15.0",
+]
+
+[project.optional-dependencies]
+whisper = ["openai-whisper"]
+web = [
+  "fastapi>=0.116.0",
+  "python-multipart>=0.0.20",
+  "uvicorn[standard]>=0.35.0",
+]
+dev = ["pytest>=8.3.0", "ruff>=0.9.0"]
+all = [
+  "openai-whisper",
+  "fastapi>=0.116.0",
+  "python-multipart>=0.0.20",
+  "uvicorn[standard]>=0.35.0",
+]
+
+[project.scripts]
+yt-auto-editor = "yt_auto_editor.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yt_auto_editor"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
