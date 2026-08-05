@@ -6,7 +6,7 @@ import hashlib
 import zipfile
 from pathlib import Path
 
-EXPECTED_SHA256 = "ad0dab495fb757199d0c5d699ab30e4de906c098e0e118718d5f1752bbde3ddf"
+EXPECTED_SHA256 = "24de5b95bb6c10813e7ef9475c2f75f8402a7c26ffe55fdca2b741006667547e"
 
 
 def safe_extract(archive: zipfile.ZipFile, target: Path) -> None:
@@ -67,6 +67,7 @@ def main() -> None:
     print("  python3 -m venv .venv && source .venv/bin/activate")
     print("  pip install -e '.[all,dev]'")
     print("  cp config.example.yaml config.yaml && cp .env.example .env")
+    print("  yt-auto-editor doctor")
     print("  yt-auto-editor serve --host 127.0.0.1 --port 8787")
 
 
