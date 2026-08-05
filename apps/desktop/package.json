@@ -58,10 +58,8 @@
       "iconSize": 96,
       "iconTextSize": 13,
       "window": {
-        "size": {
-          "width": 560,
-          "height": 380
-        }
+        "width": 560,
+        "height": 380
       },
       "contents": [
         {
