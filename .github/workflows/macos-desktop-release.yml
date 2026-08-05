@@ -17,6 +17,9 @@ on:
 permissions:
   contents: write
 
+env:
+  DESKTOP_STAGE: ${{ runner.temp }}/heather-desktop-build
+
 jobs:
   build:
     runs-on: macos-14
@@ -26,14 +29,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install desktop dependencies
-        run: npm install --prefix apps/desktop --no-audit --no-fund
-      - name: Validate desktop sources
-        run: npm run check --prefix apps/desktop
       - name: Verify worker package
         run: python3 services/youtube-auto-editor/install.py --verify-only
+      - name: Create isolated desktop build tree
+        run: |
+          rm -rf "$DESKTOP_STAGE"
+          mkdir -p "$DESKTOP_STAGE/apps" "$DESKTOP_STAGE/services"
+          cp -R apps/desktop "$DESKTOP_STAGE/apps/desktop"
+          cp -R services/youtube-auto-editor "$DESKTOP_STAGE/services/youtube-auto-editor"
+      - name: Install desktop dependencies
+        working-directory: ${{ env.DESKTOP_STAGE }}/apps/desktop
+        run: npm install --no-audit --no-fund
+      - name: Validate desktop sources
+        working-directory: ${{ env.DESKTOP_STAGE }}/apps/desktop
+        run: npm run check
       - name: Build macOS x64 and arm64 packages
-        run: npm run dist --prefix apps/desktop -- --x64 --arm64
+        working-directory: ${{ env.DESKTOP_STAGE }}/apps/desktop
+        run: npm run dist -- --x64 --arm64
+      - name: Collect packages
+        run: |
+          mkdir -p apps/desktop/dist
+          cp "$DESKTOP_STAGE"/apps/desktop/dist/*.dmg apps/desktop/dist/
+          cp "$DESKTOP_STAGE"/apps/desktop/dist/*.zip apps/desktop/dist/
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
