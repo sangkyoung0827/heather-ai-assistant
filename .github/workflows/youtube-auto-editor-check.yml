@@ -57,7 +57,7 @@ jobs:
         run: npm run typecheck
 
       - name: Build Heather production app
-        run: npm run build
+        run: npm run build -w @heather/web
 
       - name: Set up Python
         uses: actions/setup-python@v5
