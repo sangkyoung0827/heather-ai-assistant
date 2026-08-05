@@ -20,7 +20,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-14
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       DESKTOP_STAGE: /tmp/heather-desktop-build
     steps:
@@ -45,11 +45,15 @@ jobs:
       - name: Build macOS x64 and arm64 packages
         working-directory: /tmp/heather-desktop-build/apps/desktop
         run: npm run dist -- --x64 --arm64
-      - name: Collect packages
+      - name: Mount and verify installable DMGs
+        working-directory: /tmp/heather-desktop-build/apps/desktop
+        run: bash verify-macos-package.sh dist
+      - name: Collect packages and checksums
         run: |
           mkdir -p apps/desktop/dist
           cp "$DESKTOP_STAGE"/apps/desktop/dist/*.dmg apps/desktop/dist/
           cp "$DESKTOP_STAGE"/apps/desktop/dist/*.zip apps/desktop/dist/
+          shasum -a 256 apps/desktop/dist/* > apps/desktop/dist/SHA256SUMS.txt
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -57,6 +61,7 @@ jobs:
           path: |
             apps/desktop/dist/*.dmg
             apps/desktop/dist/*.zip
+            apps/desktop/dist/SHA256SUMS.txt
           if-no-files-found: error
 
   release:
@@ -71,10 +76,10 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: desktop-v0.5.0-${{ github.run_number }}
+          TAG: desktop-v0.6.0-${{ github.run_number }}
         run: |
           gh release create "$TAG" release/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Heather Desktop 0.5.0" \
-            --notes "macOS desktop build with managed local video worker. This build is not notarized because no Apple Developer ID certificate is configured." \
+            --title "Heather Desktop 0.6.0" \
+            --notes "Standard macOS drag-and-drop installer. The DMG contains Heather.app and an Applications shortcut, verifies the app bundle after mounting, and can move itself into /Applications on first launch. The build is ad-hoc signed but not Apple-notarized because no Developer ID certificate is configured." \
             --latest
